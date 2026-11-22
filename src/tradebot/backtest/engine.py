@@ -92,8 +92,13 @@ def run_portfolio_backtest(
     slippage: float = 0.0,
     max_positions: Optional[int] = None,
     benchmark: Optional[pd.Series] = None,
+    periods_per_year: Optional[int] = None,
 ) -> BacktestResult:
-    """Backtest one strategy over several symbols sharing one cash account."""
+    """Backtest one strategy over several symbols sharing one cash account.
+
+    `periods_per_year` annualizes the Sharpe ratio; it defaults to daily bars for the market,
+    so pass it for intraday data (e.g. 365 * 24 for hourly crypto bars).
+    """
     risk = risk or RiskConfig()
     max_positions = max_positions or risk.max_positions
     market = market_of(next(iter(data))) if data else "us"
@@ -205,7 +210,8 @@ def run_portfolio_backtest(
     eq_eval = equity_s[equity_s.index >= start_ts]
     bh = {s: float(b.close[-1] / b.close[min(strategy.warmup, len(b.close) - 1)] - 1) for s, b in books.items()}
     metrics = compute_metrics(eq_eval, trades, invested_s[invested_s.index >= start_ts],
-                              float(np.mean(list(bh.values()))), PERIODS_PER_YEAR.get(market, 252))
+                              float(np.mean(list(bh.values()))),
+                              periods_per_year or PERIODS_PER_YEAR.get(market, 252))
     if benchmark is not None and not benchmark.empty:
         bm = benchmark[benchmark.index >= start_ts]
         metrics["benchmark_return"] = float(bm.iloc[-1] / bm.iloc[0] - 1) if len(bm) > 1 else 0.0

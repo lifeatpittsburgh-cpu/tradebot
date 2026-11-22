@@ -22,10 +22,19 @@ class DataProvider(ABC):
         ...
 
 
-def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
-    """Coerce a raw frame into the standard OHLCV shape."""
+def empty_ohlcv() -> pd.DataFrame:
+    """An empty OHLCV frame that still has a DatetimeIndex, so date filters work on it."""
+    return pd.DataFrame(columns=OHLCV_COLUMNS, index=pd.DatetimeIndex([], name="date"), dtype=float)
+
+
+def normalize_ohlcv(df: pd.DataFrame, tz: Optional[str] = None) -> pd.DataFrame:
+    """Coerce a raw frame into the standard OHLCV shape.
+
+    Timestamps carrying a timezone are converted to `tz` (when given) and then made naive,
+    so intraday bars read in the exchange's local wall-clock time.
+    """
     if df is None or df.empty:
-        return pd.DataFrame(columns=OHLCV_COLUMNS)
+        return empty_ohlcv()
     df = df.copy()
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
@@ -38,11 +47,16 @@ def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     df = df[OHLCV_COLUMNS]
     df.index = pd.to_datetime(df.index)
     if getattr(df.index, "tz", None) is not None:
+        if tz:
+            df.index = df.index.tz_convert(tz)
         df.index = df.index.tz_localize(None)
     df.index.name = "date"
     df = df[~df.index.duplicated(keep="last")].sort_index()
     return df.dropna(subset=["open", "high", "low", "close"])
 
+
+# Exchange timezone per market, used to show intraday bars in local time.
+MARKET_TZ = {"us": "America/New_York", "india": "Asia/Kolkata", "crypto": "UTC"}
 
 # When each market's daily candle is final (local time) — a little after the official close.
 _SESSION_CLOSE = {

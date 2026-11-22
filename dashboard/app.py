@@ -17,12 +17,14 @@ warnings.filterwarnings("ignore", message=".*urllib3 v2 only supports OpenSSL.*"
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
-from charts import drawdown_chart, line_chart, price_chart  # noqa: E402
+import streamlit.components.v1 as components  # noqa: E402
+
+from charts import chart_html, drawdown_chart, fmt_price, line_chart, price_chart  # noqa: E402
 from tradebot import indicators as ind  # noqa: E402
 from tradebot.backtest import run_portfolio_backtest  # noqa: E402
 from tradebot.config import (CURRENCY, active_markets, is_tradable, load_settings,  # noqa: E402
                              market_of, resolve_path)
-from tradebot.data import CachedProvider, YFinanceProvider  # noqa: E402
+from tradebot.data import INTRADAY_MAX_DAYS, CachedProvider, YFinanceProvider  # noqa: E402
 from tradebot.risk import RiskConfig  # noqa: E402
 from tradebot.scanner import signal_for_latest_bar  # noqa: E402
 from tradebot.services import (DISCLAIMER, accounts_frame, broker_from, history_frame,  # noqa: E402
@@ -51,6 +53,20 @@ def load_history(symbol: str, start_iso: str, nonce: int) -> pd.DataFrame:
     return provider.get_history(symbol, date.fromisoformat(start_iso))
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def load_intraday(symbol: str, interval: str, days: int, nonce: int) -> pd.DataFrame:
+    """Minute/hour bars for the chart. Cached for a minute only; the last bar may still be forming."""
+    return YFinanceProvider().get_intraday(symbol, interval, days)
+
+
+def no_data_message(symbol: str) -> str:
+    msg = f"Yahoo Finance returned no data for **{symbol}**. Check the ticker."
+    if market_of(symbol) == "crypto":
+        msg += (" Some coins use a numbered Yahoo ticker because the plain name is taken, e.g. Uniswap is "
+                "`UNI7083-USD`. Search the coin on finance.yahoo.com to find its exact ticker.")
+    return msg
+
+
 def history(symbol: str, days: int) -> pd.DataFrame:
     return load_history(symbol, (date.today() - timedelta(days=days)).isoformat(), st.session_state.nonce)
 
@@ -71,6 +87,14 @@ def scan_market(market: str, strategy_name: str, nonce: int):
         except Exception as exc:
             errors[sym] = f"{type(exc).__name__}: {exc}"
     return signals_frame(sigs), errors
+
+
+def show_price_chart(fig) -> None:
+    """Price chart with time-only zoom (wheel, drag or +/-) and price panels that re-fit to the view."""
+    theme = getattr(getattr(st.context, "theme", None), "type", None)
+    components.html(chart_html(fig, dark=theme == "dark"), height=int(fig.layout.height or 860) + 20)
+    st.caption("Drag the chart to move through time. Scroll or use + / − in the toolbar to zoom. "
+               "Double-click to reset the view.")
 
 
 def price_fmt(market: str) -> str:
@@ -132,20 +156,75 @@ with tab_signals:
 
 
 # ---- Chart -----------------------------------------------------------------------------------
+# Periods offered per bar interval, as (label, days). Yahoo keeps 7 days of 1m bars,
+# 60 days of 5m/15m bars and 2 years of hourly bars.
+CHART_PERIODS = {
+    "1m": [("1D", 1), ("2D", 2), ("5D", 5), ("7D", 7)],
+    "5m": [("1D", 1), ("5D", 5), ("1M", 30), ("2M", 60)],
+    "15m": [("5D", 5), ("1M", 30), ("2M", 60)],
+    "1h": [("1M", 30), ("3M", 92), ("6M", 183), ("1Y", 365), ("2Y", 730)],
+    "1D": [("3M", 92), ("6M", 183), ("1Y", 365), ("2Y", 730), ("5Y", 1826)],
+}
+INTRADAY_VIEW_BARS = 120  # intraday charts open on the latest 120 candles; drag left for the rest of the period
+DEFAULT_PERIOD = {"1m": "1D", "5m": "5D", "15m": "1M", "1h": "3M", "1D": "1Y"}
+
+
+def _intraday_chart(symbol: str, interval: str, days: int, label: str) -> None:
+    sym_market = market_of(symbol)
+    # Load extra bars so the 200-bar average is valid from the first bar shown, within Yahoo's limit.
+    with st.spinner(f"Loading {interval} bars for {symbol}..."):
+        df = load_intraday(symbol, interval, INTRADAY_MAX_DAYS[interval], st.session_state.nonce)
+    if df.empty:
+        st.error(no_data_message(symbol))
+        return
+    display_from = df.index[-1] - pd.Timedelta(days=days)
+    if days == 1:  # "1D" means the latest session, however long ago it started
+        display_from = pd.Timestamp(df.index[-1].date())
+        if sym_market == "crypto":
+            display_from = df.index[-1] - pd.Timedelta(hours=24)
+    shown = df[df.index >= display_from]
+    last, first = shown["close"].iloc[-1], shown["open"].iloc[0]
+    tz = {"us": "New York", "india": "India", "crypto": "UTC"}.get(sym_market, "")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Last", f"{fmt_price(last)}", f"{last / first - 1:+.2%} over {label}", border=True,
+              help=f"Latest {interval} bar at {df.index[-1]:%Y-%m-%d %H:%M} ({tz} time). It may still be forming.")
+    k2.metric("High", f"{fmt_price(shown['high'].max())}", border=True, help=f"Highest price over {label}")
+    k3.metric("Low", f"{fmt_price(shown['low'].min())}", border=True, help=f"Lowest price over {label}")
+    k4.metric(f"RSI ({interval})", f"{ind.rsi(df['close']).iloc[-1]:.0f}", border=True,
+              help="RSI (14) on these bars: <30 oversold, >70 overbought")
+    show_sigs = st.toggle("Show strategy signals on these bars", value=False,
+                          help="The strategies are built and tested for daily candles. On minute bars their "
+                               "signals are for reference only; paper trading and the Signals tab use daily candles.")
+    sigs = strategy_from(settings, strategy_name).generate(df) if show_sigs else pd.DataFrame(
+        {"signal": 0, "reason": ""}, index=df.index)
+    st.caption(f"{interval} candles, {tz} time. Indicators are computed on {interval} bars "
+               f"(SMA 20 = last 20 bars). Yahoo data can lag a few minutes.")
+    fig = price_chart(df, sigs, sym_market, display_from=display_from, intraday=True,
+                      initial_bars=INTRADAY_VIEW_BARS)
+    show_price_chart(fig)
+
+
 with tab_chart:
     watch = symbols_for(settings, market)
-    c1, c2, c3 = st.columns([2, 2, 3])
+    c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
     pick = c1.selectbox("Symbol", watch, key="chart_symbol") if watch else None
     custom = c2.text_input("…or any ticker", placeholder="e.g. TSLA or DOGE-USD").strip().upper()
-    span = c3.segmented_control("Period", ["3M", "6M", "1Y", "2Y", "5Y"], default="1Y", key="chart_span")
+    interval = c3.segmented_control("Interval", list(CHART_PERIODS), default="1D", key="chart_interval") or "1D"
+    options = CHART_PERIODS[interval]
+    span = c4.segmented_control("Period", [lbl for lbl, _ in options], default=DEFAULT_PERIOD[interval],
+                                key=f"chart_span_{interval}") or DEFAULT_PERIOD[interval]
+    days = dict(options)[span]
     symbol = custom or pick
-    if symbol:
-        days = {"3M": 92, "6M": 183, "1Y": 365, "2Y": 730, "5Y": 1826}[span or "1Y"]
+    if symbol and interval != "1D":
+        _intraday_chart(symbol, interval, days, span)
+    elif symbol:
         strategy = strategy_from(settings, strategy_name)
         with st.spinner(f"Loading {symbol}..."):
             df = history(symbol, days + 420)  # extra history so SMA200 is valid from the first bar shown
-        if len(df) < strategy.warmup + 2:
-            st.error(f"Not enough data for {symbol} ({len(df)} bars). Check the ticker.")
+        if df.empty:
+            st.error(no_data_message(symbol))
+        elif len(df) < strategy.warmup + 2:
+            st.error(f"Only {len(df)} daily bars of history for {symbol}; the strategy needs {strategy.warmup + 2}.")
         else:
             sym_market = market_of(symbol)
             risk = RiskConfig.from_settings(settings)
@@ -153,12 +232,12 @@ with tab_chart:
                                         settings["paper"]["starting_capital"].get(sym_market))
             prev_close = float(df["close"].iloc[-2])
             k1, k2, k3, k4, k5 = st.columns(5)
-            k1.metric("Close", f"{sig.price:,.4g}", f"{sig.price / prev_close - 1:+.2%}", border=True,
+            k1.metric("Close", f"{fmt_price(sig.price)}", f"{sig.price / prev_close - 1:+.2%}", border=True,
                       help=f"{symbol} close on {sig.date} (latest completed candle)")
             k2.metric("Signal", sig.action, border=True, help="Signal on the latest completed candle")
             k3.metric("RSI", f"{ind.rsi(df['close']).iloc[-1]:.0f}", border=True, help="RSI (14): <30 oversold, >70 overbought")
             k4.metric("ATR", f"{sig.extra['atr'] / sig.price:.1%}", border=True,
-                      help=f"Average daily range (14): {sig.extra['atr']:,.4g}, as % of price")
+                      help=f"Average daily range (14): {fmt_price(sig.extra['atr'])}, as % of price")
             last = sig.extra.get("last_signal")
             k5.metric("Last", last or "none", sig.extra.get("last_signal_date", "")[5:] or None,
                       delta_color="off", border=True, help="Most recent BUY/SELL and its date")
@@ -166,18 +245,18 @@ with tab_chart:
             levels = {}
             if sig.action == "BUY" and sig.stop_loss:
                 levels = {"Stop": sig.stop_loss, "Target": sig.target}
-                st.success(f"**BUY** {symbol}: {sig.reason}. Entry near the next open, stop {sig.stop_loss:,.4g}, "
-                           f"target {sig.target:,.4g}" + (f", size {sig.quantity:g}" if sig.quantity else "") + ".")
+                st.success(f"**BUY** {symbol}: {sig.reason}. Entry near the next open, stop {fmt_price(sig.stop_loss)}, "
+                           f"target {fmt_price(sig.target)}" + (f", size {sig.quantity:g}" if sig.quantity else "") + ".")
             elif sig.action == "SELL":
                 st.error(f"**SELL** {symbol}: {sig.reason}. Exit at the next open if you hold it.")
             pos = broker_from(settings).positions.get(symbol)
             if pos:
                 levels = {"Entry": pos["entry_price"], "Stop": pos["stop_loss"], "Target": pos["target"]}
-                st.info(f"Paper position: {pos['quantity']:g} @ {pos['entry_price']:,.4g} since {pos['entry_date']}.")
+                st.info(f"Paper position: {pos['quantity']:g} @ {fmt_price(pos['entry_price'])} since {pos['entry_date']}.")
 
             fig = price_chart(df, strategy.generate(df), sym_market,
                               display_from=df.index[-1] - pd.Timedelta(days=days), levels=levels)
-            st.plotly_chart(fig, config={"displaylogo": False})
+            show_price_chart(fig)
 
 
 # ---- Backtest --------------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from typing import Optional
 
 import pandas as pd
 
-from .base import DataProvider, normalize_ohlcv
+from .base import DataProvider, empty_ohlcv, normalize_ohlcv
 
 
 class CachedProvider(DataProvider):
@@ -41,6 +41,8 @@ class CachedProvider(DataProvider):
 
 
 def _slice(df: pd.DataFrame, start: date, end: Optional[date]) -> pd.DataFrame:
+    if df.empty:
+        return empty_ohlcv()
     out = df[df.index >= pd.Timestamp(start)]
     if end is not None:
         out = out[out.index <= pd.Timestamp(end)]

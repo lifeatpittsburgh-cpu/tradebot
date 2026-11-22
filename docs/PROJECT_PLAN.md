@@ -122,6 +122,26 @@ tradingbot/
 - Caveat: 5 years, ~8 large caps per market, one mostly rising period. Treat as a smoke test,
   not evidence of an edge. Phase 4 (walk-forward, wider universe) decides what's real.
 
+**2026-11-22, intraday portfolio backtest (same strategies, settings and costs), to 2026-11-20/22**
+
+Yahoo history limits: 5m bars cover the last 60 days, 1h bars the last 2 years. Daily = the same
+strategy on daily candles over the same window, for comparison.
+
+| Market | Bars | Best strategy | Return | Before costs | Trades | Composite | Daily composite | Buy & hold (eq. wt) |
+|---|---|---|---|---|---|---|---|---|
+| US | 5m (60 d) | rsi_reversion | -4.0% | -3.3% | 72 | -9.9% | -1.2% | -10.1% |
+| US | 1h (2 y) | sma_crossover | +14.1% | +24.4% | 284 | +2.5% | +28.0% | +57.3% |
+| Crypto | 5m (60 d) | rsi_reversion | -12.9% | -2.9% | 142 | -66.7% | -3.3% | -36.2% |
+| Crypto | 1h (2 y) | rsi_reversion | -15.9% | -3.7% | 173 | -61.0% | +1.0% | -59.9% |
+
+- No strategy makes money before costs on 5m bars, and none on crypto at all except MACD 1h
+  (+25.7% before costs, -79.3% after). Win rates fall to 11-27% on 5m: a 2×ATR stop on 5m bars is
+  tiny, so ordinary noise stops trades out.
+- Costs decide it: crypto round trips cost ~0.4%; MACD made 2,954 trades in 60 days on 5m crypto.
+- On daily candles, composite and sma_crossover (the two re-run that way) beat their intraday
+  versions in every window.
+  Conclusion: keep signals and paper trading on daily candles; use intraday charts for viewing only.
+
 ## Known limits
 - yfinance is unofficial and rate-limited; good for prototyping, not production. Swap
   in a paid feed (Polygon, Alpha Vantage, Kite historical) through the `DataProvider` interface.
