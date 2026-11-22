@@ -1,0 +1,82 @@
+# TradeBot configuration. Edit watchlists and parameters here.
+
+# Markets used by "all" in scans, paper trading and the dashboard. India still works with -m india.
+active_markets: [us, crypto]
+
+watchlists:
+  us:
+    - AAPL
+    - MSFT
+    - NVDA
+    - AMZN
+    - GOOGL
+    - META
+    - JPM
+    - XOM
+    - SPY
+  crypto:           # Yahoo crypto tickers end in -USD; candles close at 00:00 UTC
+    - BTC-USD
+    - ETH-USD
+    - SOL-USD
+    - BNB-USD
+    - XRP-USD
+    - ADA-USD
+    - AVAX-USD
+    - LINK-USD
+    - DOGE-USD
+  india:            # NSE symbols use .NS, BSE symbols use .BO
+    - RELIANCE.NS
+    - TCS.NS
+    - INFY.NS
+    - HDFCBANK.NS
+    - ICICIBANK.NS
+    - ITC.NS
+    - LT.NS
+    - SBIN.NS
+    - ^NSEI          # Nifty 50 index: scanned for reference, never traded
+
+strategy:
+  name: composite          # sma_crossover | rsi_reversion | macd_trend | composite
+  params: {}               # overrides for the chosen strategy's defaults
+
+data:
+  lookback_days: 500       # history fetched for scans
+  cache_dir: data_cache
+  cache_ttl_minutes: 60    # re-download a symbol at most once an hour
+
+risk:
+  risk_per_trade: 0.01     # risk 1% of account per trade
+  atr_period: 14
+  atr_stop_mult: 2.0       # stop = entry - 2 * ATR
+  reward_risk: 2.0         # target = entry + 2 * (entry - stop)
+  max_position_pct: 0.20   # never put more than 20% of the account in one stock
+  max_positions: 8         # most stocks held at once per account
+
+backtest:
+  years: 5
+  benchmark:               # index to compare portfolio backtests against
+    us: SPY
+    crypto: BTC-USD
+    india: ^NSEI
+
+costs:                     # per side, as a fraction of trade value
+  us:
+    commission: 0.0
+    slippage: 0.0005
+  crypto:
+    commission: 0.001      # typical exchange taker fee (0.1%)
+    slippage: 0.001
+  india:
+    commission: 0.001      # approx. brokerage + STT + charges for delivery trades
+    slippage: 0.0005
+
+paper:
+  ledger_path: state/paper_ledger.json
+  starting_capital:
+    us: 10000              # USD
+    crypto: 10000          # USD
+    india: 500000          # INR
+
+alerts:
+  console: true
+  telegram: false          # needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env
