@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from tradebot.backtest import run_portfolio_backtest
@@ -42,3 +43,34 @@ def test_drop_incomplete_bar(market, now, expect_dropped):
     df = make_ohlcv(np.full(5, 100.0), start="2026-11-16")  # last bar 2026-11-20
     out = drop_incomplete_bar(df, market, now)
     assert len(out) == (4 if expect_dropped else 5)
+
+
+def test_empty_download_keeps_datetime_index():
+    from tradebot.data import normalize_ohlcv
+
+    out = normalize_ohlcv(pd.DataFrame())
+    assert out.empty and isinstance(out.index, pd.DatetimeIndex)
+    assert out[out.index >= pd.Timestamp("2024-01-01")].empty  # date filters must not crash
+
+
+def test_cache_handles_unknown_ticker(tmp_path):
+    from datetime import date
+
+    from tradebot.data import CachedProvider, DataProvider, normalize_ohlcv
+
+    class NoData(DataProvider):
+        def get_history(self, symbol, start, end=None):
+            return normalize_ohlcv(pd.DataFrame())
+
+    out = CachedProvider(NoData(), tmp_path).get_history("UNI-USD", date(2024, 1, 1))
+    assert out.empty
+    assert not (tmp_path / "UNI-USD.csv").exists()
+
+
+def test_intraday_timestamps_converted_to_exchange_time():
+    from tradebot.data import normalize_ohlcv
+
+    idx = pd.DatetimeIndex(["2024-03-04 14:30", "2024-03-04 14:31"], tz="UTC")
+    raw = pd.DataFrame({"Open": [1, 2], "High": [1, 2], "Low": [1, 2], "Close": [1, 2], "Volume": [5, 5]}, index=idx)
+    out = normalize_ohlcv(raw, tz="America/New_York")
+    assert out.index[0] == pd.Timestamp("2024-03-04 09:30") and out.index.tz is None
