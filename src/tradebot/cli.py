@@ -265,6 +265,23 @@ def _print_status(broker: PaperBroker) -> None:
               + ", ".join(f"{m} {v:+,.2f}" for m, v in h.groupby("market")["pnl"].sum().items()))
 
 
+def _check_chart_alerts(settings, no_alerts: bool) -> None:
+    """Chart alerts (`tradebot watch`) ride on the scheduled job's 5-minute check."""
+    from datetime import datetime
+
+    from .watch import run_and_alert
+
+    try:
+        r = run_and_alert(settings, send_alerts=not no_alerts)
+        if r.signals or r.errors:
+            print(f"--- chart alerts {datetime.now().astimezone():%Y-%m-%d %H:%M %Z}: "
+                  f"{len(r.signals)} new signal(s), {len(r.errors)} error(s)")
+            for k, err in r.errors.items():
+                print(f"!! {k}: {err}", file=sys.stderr)
+    except Exception as exc:  # never block the daily run
+        print(f"!! chart alerts failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
 def cmd_daily(args, settings) -> int:
     from datetime import datetime, timezone
 
@@ -272,7 +289,7 @@ def cmd_daily(args, settings) -> int:
     from .daily import run_daily, save_last_run
 
     sched_state, slot = None, None
-    if args.if_due:  # called every 15 minutes by the scheduled job: only run once per daily slot
+    if args.if_due:  # called every 5 minutes by the scheduled job: only run once per daily slot
         from . import schedule
 
         default_time, default_tz = schedule.schedule_config(settings)
@@ -280,6 +297,7 @@ def cmd_daily(args, settings) -> int:
         due, slot = schedule.is_due(datetime.now(timezone.utc), args.at or default_time,
                                     args.tz or default_tz, sched_state)
         forced = sched_state.pop("force_next", False)
+        _check_chart_alerts(settings, args.no_alerts)
         if not (due or forced):
             return 0
 
@@ -291,7 +309,7 @@ def cmd_daily(args, settings) -> int:
     for sym, err in report.errors.items():
         print(f"!! {sym}: {err}", file=sys.stderr)
     alert = report.alert()
-    # A failing scheduled run retries every 15 minutes; send its failure alert only once per slot.
+    # A failing scheduled run retries every 5 minutes; send its failure alert only once per slot.
     repeat_failure = (sched_state is not None and not report.ok
                       and sched_state.get("failure_alerted_slot") == (slot.isoformat() if slot else None))
     if args.no_alerts or repeat_failure:
@@ -348,7 +366,7 @@ def cmd_schedule(args, settings) -> int:
         for note in schedule.timing_notes(time_str, tz):
             print("  " + note)
         print(f"Job file: {path}\nLog:      {schedule.LOG_PATH}")
-        print("It checks every 15 minutes, so a run missed while the Mac slept or was off happens soon after "
+        print("It checks every 5 minutes (also for chart alerts, see `tradebot watch`), so a run missed while the Mac slept or was off happens soon after "
               "it wakes. Remove it with `tradebot schedule uninstall`.")
     elif args.action == "uninstall":
         print("Removed the scheduled job." if schedule.uninstall() else "No scheduled job was installed.")
@@ -370,8 +388,11 @@ def cmd_schedule(args, settings) -> int:
             due, _ = schedule.is_due(now, time_str, tz, schedule.load_state())
             nxt = schedule.next_slot(now, time_str, tz).astimezone()
             print(f"Installed: once a day after {time_str} {tz} ({'loaded' if info['loaded'] else 'NOT loaded'})")
-            print("  " + ("Due now: it will run at the next 15-minute check." if due
+            print("  " + ("Due now: it will run at the next 5-minute check." if due
                           else f"Next run: {nxt:%a %d %b %H:%M} on this Mac's clock."))
+            if info.get("check_every") and info["check_every"] != schedule.CHECK_EVERY_SECONDS:
+                print(f"  Checks every {info['check_every'] // 60} min. Run `tradebot schedule install` again "
+                      f"to check every {schedule.CHECK_EVERY_SECONDS // 60} min (needed for timely chart alerts).")
             if "last exit code" in info:
                 print(f"  last check exit code: {info['last exit code']}")
         last = load_last_run(settings)
@@ -387,6 +408,12 @@ def _cmd_broker(args, settings) -> int:
     from .broker.cli import cmd_broker
 
     return cmd_broker(args, settings)
+
+
+def _cmd_watch(args, settings) -> int:
+    from .watch import cmd_watch
+
+    return cmd_watch(args, settings)
 
 
 def _cmd_universe(args, settings) -> int:
@@ -488,6 +515,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_universe_parser(sub)
     add_screen_parser(sub)
     add_broker_parser(sub)
+    from .watch import add_parser as add_watch_parser
+
+    add_watch_parser(sub)
 
     sp = sub.add_parser("schedule", help="run `tradebot daily` automatically every day (macOS)")
     sp.add_argument("action", choices=["install", "status", "run-now", "uninstall"])
@@ -502,7 +532,7 @@ def main(argv: List[str] = None) -> int:
     handler = {"strategies": cmd_strategies, "scan": cmd_scan, "backtest": cmd_backtest,
                "paper": cmd_paper, "dashboard": cmd_dashboard, "daily": cmd_daily,
                "alerts": cmd_alerts, "schedule": cmd_schedule, "research": _cmd_research,
-               "universe": _cmd_universe, "screen": _cmd_screen, "broker": _cmd_broker}[args.command]
+               "universe": _cmd_universe, "screen": _cmd_screen, "broker": _cmd_broker, "watch": _cmd_watch}[args.command]
     return handler(args, settings)
 
 
