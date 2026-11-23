@@ -35,4 +35,7 @@ class Signal:
             if self.quantity:
                 parts.append(f"qty {self.quantity:g}")
         parts.append(f"[{self.strategy}] {self.reason}")
+        ai = self.extra.get("ai") if self.action in ("BUY", "SELL") else None
+        if ai:
+            parts.append(f"AI {ai['view']} {ai['confidence']:.2f}: {ai['reason']}")
         return " | ".join(parts)

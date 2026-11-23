@@ -237,6 +237,41 @@ These are prompts to look at a chart, not tested trades. The strategies were tes
 candles, and the 5m/1h backtest lost to daily after costs. Chart alerts never touch the paper
 account or Alpaca. The list lives in `state/watchlist.json`.
 
+## AI market study (Claude, optional)
+
+Once a day, Claude reads recent Yahoo headlines for every watchlist symbol, plus the market's
+mood (SPY and BTC trends, VIX, market headlines), and rates each one **bullish / neutral /
+bearish** with a confidence and a one-line reason. It is a second opinion on the chart signals:
+
+- A **BUY is held back** (the paper account and Alpaca skip it) when Claude rates that symbol, or
+  its whole market, bearish with confidence ≥ `min_confidence` (0.6). The alert lists what was
+  held back and why.
+- **SELLs are never blocked**, and the AI never creates a trade on its own.
+- Every BUY/SELL alert shows Claude's view next to it; the dashboard's Signals tab shows the
+  market mood and an AI column.
+- If the study can't run (no key, no internet, API error), signals go through unchanged and the
+  alert says the study was unavailable.
+
+Setup:
+
+1. `pip install -e ".[ai]"` (installs the Anthropic SDK).
+2. Sign in, either way works:
+   - **On the Mac:** `brew install anthropics/tap/ant`, then `ant auth login` (the browser opens
+     to finish). The SDK and the scheduled job pick the sign-in up from `~/.config/anthropic/`.
+   - **With a key** (simplest on a headless Raspberry Pi): create one at console.anthropic.com →
+     API Keys and add `ANTHROPIC_API_KEY=...` to `.env`. A key in `.env` wins over the sign-in.
+3. Try it: `tradebot ai study` (one Claude request), then `tradebot ai show`.
+4. Turn it on for the daily job: `ai_study.enabled: true` in `config/settings.yaml`. Set
+   `veto: false` to see the AI view in alerts without it holding anything back.
+
+Cost: one request a day with about 18 symbols' headlines, roughly 5–10 cents (about $2–3 a month) with
+`claude-opus-5-5` at `effort: low`. A study is reused for 12 hours, so re-running the daily job or
+the dashboard doesn't pay again.
+
+Limits: Yahoo's headlines are free but patchy (some are off-topic; Claude is told to say neutral
+when the news is thin). The AI's calls **can't be backtested fairly** (the model already knows how
+past news played out), so treat the veto as a risk filter, not a proven edge.
+
 ## Tests
 
 ```bash
