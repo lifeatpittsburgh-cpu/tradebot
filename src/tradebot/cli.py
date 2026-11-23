@@ -383,6 +383,12 @@ def cmd_schedule(args, settings) -> int:
     return 0
 
 
+def _cmd_broker(args, settings) -> int:
+    from .broker.cli import cmd_broker
+
+    return cmd_broker(args, settings)
+
+
 def _cmd_universe(args, settings) -> int:
     from .universe import cmd_universe
 
@@ -476,9 +482,12 @@ def build_parser() -> argparse.ArgumentParser:
     from .research.report import add_parser as add_research_parser
     from .universe import add_parser as add_universe_parser
 
+    from .broker.cli import add_parser as add_broker_parser
+
     add_research_parser(sub)
     add_universe_parser(sub)
     add_screen_parser(sub)
+    add_broker_parser(sub)
 
     sp = sub.add_parser("schedule", help="run `tradebot daily` automatically every day (macOS)")
     sp.add_argument("action", choices=["install", "status", "run-now", "uninstall"])
@@ -493,7 +502,7 @@ def main(argv: List[str] = None) -> int:
     handler = {"strategies": cmd_strategies, "scan": cmd_scan, "backtest": cmd_backtest,
                "paper": cmd_paper, "dashboard": cmd_dashboard, "daily": cmd_daily,
                "alerts": cmd_alerts, "schedule": cmd_schedule, "research": _cmd_research,
-               "universe": _cmd_universe, "screen": _cmd_screen}[args.command]
+               "universe": _cmd_universe, "screen": _cmd_screen, "broker": _cmd_broker}[args.command]
     return handler(args, settings)
 
 

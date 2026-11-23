@@ -26,6 +26,8 @@ DEFAULTS: Dict[str, Any] = {
         "max_per_sector": None,
     },
     "sectors": {},
+    "broker": {"enabled": False, "mode": "paper", "markets": ["us", "crypto"], "daily_loss_limit": 0.03,
+               "max_order_value": 2000.0, "max_orders_per_run": 5, "crypto_stop_limit_gap": 0.01},
     "backtest": {"years": 5, "benchmark": {"us": "SPY", "crypto": "BTC-USD", "india": "^NSEI"}},
     "costs": {
         "us": {"commission": 0.0, "slippage": 0.0005},
