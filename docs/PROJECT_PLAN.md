@@ -16,7 +16,7 @@ signals with suggested stop-loss, target and position size, tracks them in a
 |---|---|
 | Markets | **Focus: US stocks + crypto** (`AAPL`, `BTC-USD`). India (`RELIANCE.NS`) kept but off by default |
 | Timeframe | Daily candles, end-of-day signals (swing: days to weeks) |
-| Execution | Signals + local paper trading. **No live orders in v1** |
+| Execution | Signals + local paper trading; optional Alpaca paper account; live orders only with per-order confirmation |
 | Interface | CLI first, Streamlit dashboard on top, Telegram alerts |
 | Language | Python (3.9-compatible; 3.11+ recommended) |
 
@@ -114,9 +114,17 @@ tradingbot/
 - [x] Strategy per market (`strategy.by_market`): live US uses sma_crossover (best on the S&P 500
       test), crypto keeps macd_trend (best on the crypto watchlist; no fair crypto test exists)
 
-### Phase 5 — Broker integration (optional, needs explicit opt-in)
-- [ ] Alpaca (US) paper API, Zerodha Kite / Upstox (India) read-only
-- [ ] Live order placement only behind a kill switch, daily loss limit and manual confirmation
+### Phase 5 — Broker integration (built; paper first)
+- [x] Alpaca client (REST): account, positions, orders, assets; paper and live hosts with separate keys
+- [x] Order planner: US bracket orders (stop + target at the broker); crypto market buy, protective
+      stop-limit, take-profit on the daily high; SELL signals cancel open orders and sell
+- [x] Safety: kill switch (+ close-all), daily loss limit, per-order cap, max new buys per run,
+      act-once state + client order IDs, watchlist only
+- [x] Live mode, off by default: proposals only; each order sent after a typed `yes` in
+      `tradebot broker confirm` at a terminal; proposals expire after 20 hours
+- [x] Daily job integration (`broker.enabled`) with orders in the alert
+- [ ] Connect your Alpaca paper account and let it run (needs your keys)
+- [ ] Zerodha Kite / Upstox (India) read-only: dropped while India is out of scope
 
 ## Results log
 

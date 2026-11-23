@@ -105,3 +105,16 @@ alerts:
 schedule:
   time: "20:15"
   timezone: America/New_York
+
+# Phase 5: send TradeBot's orders to an Alpaca account (README: "Broker: Alpaca").
+# Keys go in .env: ALPACA_PAPER_KEY_ID / ALPACA_PAPER_SECRET_KEY (and separate LIVE keys for live).
+broker:
+  enabled: false           # true: `tradebot daily` also sends orders to Alpaca
+  mode: paper              # paper = simulated money, orders sent automatically
+                           # live  = real money; orders are only PROPOSED and each needs a typed
+                           #         `yes` in `tradebot broker confirm`
+  markets: [us, crypto]
+  daily_loss_limit: 0.03   # no new buys after the account falls 3% in a day
+  max_order_value: 2000    # USD cap per order
+  max_orders_per_run: 5    # most new buys per daily run
+  crypto_stop_limit_gap: 0.01  # crypto stop-limit sells may fill down to 1% below the stop

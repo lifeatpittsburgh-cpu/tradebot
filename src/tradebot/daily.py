@@ -37,6 +37,7 @@ class DailyReport:
     accounts: List[str] = field(default_factory=list)
     errors: Dict[str, str] = field(default_factory=dict)
     alert_failures: List[str] = field(default_factory=list)
+    broker: List[str] = field(default_factory=list)              # Alpaca orders sent / proposed / problems
 
     @property
     def ok(self) -> bool:
@@ -53,10 +54,15 @@ class DailyReport:
             lines += ["New signals (act at the next open):"] + [f"  {s}" for s in self.new_signals]
         if self.events:
             lines += ["Paper account:"] + [f"  {e}" for e in self.events]
+        if self.broker:
+            lines += ["Alpaca:"] + [f"  {b}" for b in self.broker]
         if lines:
             lines += ["Accounts:"] + [f"  {a}" for a in self.accounts]
         if self.errors:
             lines.append(f"Skipped {len(self.errors)} symbol(s): " + ", ".join(self.errors))
+        if self.broker and any("LIVE orders awaiting" in b for b in self.broker):
+            return Alert("TradeBot: live orders need your confirmation", lines,
+                         "Run `tradebot broker confirm` to review and send them.")
         summary = ", ".join(self.new_actions) if self.new_actions else (f"{len(self.events)} paper-account update(s)" if self.events else "")
         return Alert("TradeBot daily update", lines, summary)
 
@@ -109,8 +115,23 @@ def run_daily(settings: Dict[str, Any], provider: Optional[DataProvider] = None)
     for _, a in accounts_frame(broker, markets).iterrows():
         report.accounts.append(f"{a['market']}: equity {a['equity']:,.2f} {CURRENCY.get(a['market'], '')} "
                                f"({a['return']:+.2%}), {a['open_positions']} open")
+    report.broker = broker_step(settings)
     report.finished = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return report
+
+
+def broker_step(settings: Dict[str, Any]) -> List[str]:
+    """Send (paper) or propose (live) Alpaca orders when `broker.enabled` is true."""
+    from .broker.executor import BrokerConfig
+
+    try:
+        if not BrokerConfig.from_settings(settings).enabled:
+            return []
+        from .broker.cli import run_broker_step
+
+        return run_broker_step(settings).lines()
+    except Exception as exc:  # the local paper update and alerts must still go out
+        return [f"!! broker step failed: {type(exc).__name__}: {exc}"]
 
 
 def save_last_run(settings: Dict[str, Any], report: DailyReport) -> None:

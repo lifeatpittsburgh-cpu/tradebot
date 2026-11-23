@@ -66,6 +66,7 @@ tradebot dashboard                           # web dashboard on http://localhost
 tradebot daily                               # end-of-day job: paper update + alerts on new signals
 tradebot alerts test                         # send a test alert to every enabled channel
 tradebot schedule install|status|run-now|uninstall   # run `tradebot daily` automatically
+tradebot broker status|run|halt|resume|confirm       # Alpaca account (see "Broker: Alpaca")
 tradebot research -m us -s all --matrix      # walk-forward test every strategy × entry filter
 tradebot research -m crypto -s macd_trend --folds   # one strategy, show each fold's settings
 ```
@@ -106,6 +107,43 @@ gives you yesterday's signals. Orders from a signal fill at the next candle's op
 
 **Crypto notes:** tickers are Yahoo's `BTC-USD` style, quantities are fractional
 (0.0001 steps), and costs assume a 0.1% exchange fee plus 0.1% slippage per side.
+
+## Broker: Alpaca (Phase 5)
+
+TradeBot can send its daily orders to an [Alpaca](https://alpaca.markets) account. **Paper
+trading is free** and uses simulated money; that's the intended setup.
+
+**Setup (paper):**
+
+1. Create an Alpaca account, open the **Paper Trading** dashboard and generate API keys.
+2. Add them to `.env` (never commit it):
+   `ALPACA_PAPER_KEY_ID=...` and `ALPACA_PAPER_SECRET_KEY=...`
+3. Check the connection: `tradebot broker status`
+4. Preview without sending anything: `tradebot broker run --dry-run`
+5. Set `broker.enabled: true` in `config/settings.yaml`. From then on the daily job sends orders
+   to the paper account each evening and lists them in its alert.
+
+**What it sends:** for a new BUY on a US stock, one bracket order (market buy with an attached
+stop-loss and take-profit, managed by Alpaca). For crypto, a market buy, then a protective
+stop-limit sell on the next run, and a market sell once a daily high reaches the target. A SELL
+signal cancels the symbol's open orders and sells the position. Sizes follow `risk:`, based on the
+Alpaca account's equity.
+
+**Safety rules (paper and live):**
+
+| Rule | Setting / command |
+|---|---|
+| Kill switch: send nothing | `tradebot broker halt` (add `--close-all` to also sell everything), `tradebot broker resume` |
+| No new buys after a bad day | `broker.daily_loss_limit` (default 3% since the previous close) |
+| Order size cap | `broker.max_order_value` (default $2,000) |
+| New buys per run | `broker.max_orders_per_run` (default 5) |
+| Each signal acted on once | state/broker/*_processed.json + Alpaca client order IDs |
+
+**Live mode (real money) is off.** It needs all of: `broker.mode: live`, separate
+`ALPACA_LIVE_KEY_ID` / `ALPACA_LIVE_SECRET_KEY` in `.env`, and your approval of every order:
+the daily job only *proposes* live orders (the alert says so), and `tradebot broker confirm`, run
+at a terminal, shows each one and sends it only if you type `yes`. Proposals expire after 20 hours.
+The scheduled job can never confirm. Run paper for a good while before considering it.
 
 ## Strategies (long-only)
 
