@@ -36,7 +36,8 @@ watchlists:
     - ^NSEI          # Nifty 50 index: scanned for reference, never traded
 
 strategy:
-  name: composite          # sma_crossover | rsi_reversion | macd_trend | composite
+  name: macd_trend         # sma_crossover | rsi_reversion | macd_trend | composite
+                           # macd_trend: best out-of-sample in walk-forward tests (docs/PROJECT_PLAN.md)
   params: {}               # overrides for the chosen strategy's defaults
 
 data:

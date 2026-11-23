@@ -365,6 +365,12 @@ def cmd_schedule(args, settings) -> int:
     return 0
 
 
+def _cmd_research(args, settings) -> int:
+    from .research.report import cmd_research
+
+    return cmd_research(args, settings)
+
+
 def cmd_dashboard(args, settings) -> int:
     import subprocess
     from pathlib import Path
@@ -436,6 +442,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("alerts", help="test alert channels or set up Telegram")
     sp.add_argument("action", choices=["test", "telegram-chat-id"])
 
+    from .research.report import add_parser as add_research_parser
+
+    add_research_parser(sub)
+
     sp = sub.add_parser("schedule", help="run `tradebot daily` automatically every day (macOS)")
     sp.add_argument("action", choices=["install", "status", "run-now", "uninstall"])
     sp.add_argument("--time", help="HH:MM, 24-hour (default: schedule.time in settings, 20:15)")
@@ -448,7 +458,7 @@ def main(argv: List[str] = None) -> int:
     settings: Dict[str, Any] = load_settings(args.config)
     handler = {"strategies": cmd_strategies, "scan": cmd_scan, "backtest": cmd_backtest,
                "paper": cmd_paper, "dashboard": cmd_dashboard, "daily": cmd_daily,
-               "alerts": cmd_alerts, "schedule": cmd_schedule}[args.command]
+               "alerts": cmd_alerts, "schedule": cmd_schedule, "research": _cmd_research}[args.command]
     return handler(args, settings)
 
 

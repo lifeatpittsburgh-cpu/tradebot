@@ -14,7 +14,7 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "settings.yaml"
 DEFAULTS: Dict[str, Any] = {
     "active_markets": ["us", "crypto"],
     "watchlists": {"us": [], "crypto": [], "india": []},
-    "strategy": {"name": "composite", "params": {}},
+    "strategy": {"name": "macd_trend", "params": {}},
     "data": {"lookback_days": 500, "cache_dir": "data_cache", "cache_ttl_minutes": 60},
     "risk": {
         "risk_per_trade": 0.01,
