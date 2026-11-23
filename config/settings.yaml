@@ -126,7 +126,7 @@ ai_study:
   enabled: true
   model: claude-opus-5-5
   effort: low              # low | medium | high: deeper thinking costs more
-  veto: false              # false = show the AI view in alerts but never hold back a BUY
+  veto: true               # false = show the AI view in alerts but never hold back a BUY
   min_confidence: 0.7      # a bearish rating must be at least this sure to hold back a BUY
   market_veto: true        # also hold back BUYs when the whole market is rated bearish
   max_headlines: 6         # per symbol
