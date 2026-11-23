@@ -29,7 +29,7 @@ from tradebot.risk import RiskConfig  # noqa: E402
 from tradebot.scanner import signal_for_latest_bar  # noqa: E402
 from tradebot.services import (DISCLAIMER, accounts_frame, broker_from, history_frame,  # noqa: E402
                                pending_frame, positions_frame, run_paper_update, signals_frame,
-                               strategy_from, symbols_for)
+                               strategy_from, strategy_name_for, symbols_for)
 from tradebot.daily import load_last_run  # noqa: E402
 from tradebot.strategies import REGISTRY  # noqa: E402
 
@@ -110,8 +110,10 @@ with st.sidebar:
     markets = active_markets(settings)
     market = st.radio("Market", markets, format_func=lambda m: MARKET_NAMES.get(m, m))
     names = list(REGISTRY)
-    strategy_name = st.selectbox("Strategy", names, index=names.index(settings["strategy"]["name"]),
-                                 help="Rules used for signals, charts and backtests.")
+    strategy_name = st.selectbox("Strategy", names, index=names.index(strategy_name_for(settings, market)),
+                                 key=f"strategy_{market}",
+                                 help="Rules used for signals, charts and backtests. Defaults to the strategy "
+                                      "configured for this market (strategy.by_market in settings.yaml).")
     st.caption(REGISTRY[strategy_name].__doc__.strip().split("\n\n")[0].replace("\n", " "))
     if st.button("🔄 Refresh market data", width="stretch",
                  help="Re-download prices now instead of using the cached copy."):
@@ -323,7 +325,8 @@ with tab_backtest:
                     try:
                         results.append(run_portfolio_backtest(
                             data, strat, capital, risk, costs["commission"], costs["slippage"],
-                            max_positions=1 if len(data) == 1 else int(max_pos), benchmark=bm))
+                            max_positions=1 if len(data) == 1 else int(max_pos), benchmark=bm,
+                            sector_of=settings.get("sectors") or {}, max_per_sector=risk_cfg.max_per_sector))
                     except ValueError as exc:
                         st.warning(f"{strat.name}: {exc}")
             st.session_state.bt = dict(results=results, data=data, bm=bm, bm_sym=bm_sym, capital=capital,

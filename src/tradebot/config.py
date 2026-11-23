@@ -14,7 +14,7 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "settings.yaml"
 DEFAULTS: Dict[str, Any] = {
     "active_markets": ["us", "crypto"],
     "watchlists": {"us": [], "crypto": [], "india": []},
-    "strategy": {"name": "macd_trend", "params": {}},
+    "strategy": {"name": "sma_crossover", "params": {}, "by_market": {}},
     "data": {"lookback_days": 500, "cache_dir": "data_cache", "cache_ttl_minutes": 60},
     "risk": {
         "risk_per_trade": 0.01,
@@ -23,7 +23,9 @@ DEFAULTS: Dict[str, Any] = {
         "reward_risk": 2.0,
         "max_position_pct": 0.20,
         "max_positions": 8,
+        "max_per_sector": None,
     },
+    "sectors": {},
     "backtest": {"years": 5, "benchmark": {"us": "SPY", "crypto": "BTC-USD", "india": "^NSEI"}},
     "costs": {
         "us": {"commission": 0.0, "slippage": 0.0005},

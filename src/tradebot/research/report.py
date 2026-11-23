@@ -98,8 +98,67 @@ def run_research(settings: Dict[str, Any], market: str, strategies: List[str], p
     return out
 
 
+def run_sp500(settings: Dict[str, Any], strategies: List[str], since: str = "2014-01-02", seeds: int = 5,
+              max_per_sector: Optional[int] = None, capital: float = 100_000) -> pd.DataFrame:
+    """Each strategy on point-in-time S&P 500 members (`tradebot universe update` first).
+
+    A stock may be bought only while it was in the index. With ~500 stocks there are usually more
+    BUY signals than free slots, so who gets a slot is close to luck; each strategy is run with
+    `seeds` random slot orders and the spread is reported, so differences smaller than it are noise.
+    """
+    import math
+
+    import numpy as np
+
+    from ..backtest import run_portfolio_backtest
+    from ..backtest.metrics import max_drawdown
+    from ..config import resolve_path
+    from ..strategies import get_strategy
+    from ..universe import Universe, load_cached
+
+    folder = resolve_path(settings["data"]["cache_dir"]) / "sp500"
+    if not (folder / "snapshots.csv").exists():
+        raise SystemExit("No S&P 500 history yet: run `tradebot universe update` first.")
+    u = Universe.load(folder / "snapshots.csv")
+    data = load_cached(u.symbols, folder)
+    mask = {k: u.member_mask(k, df.index) for k, df in data.items()}
+    risk = RiskConfig.from_settings(settings)
+    costs = settings["costs"]["us"]
+    start = pd.Timestamp(since)
+    spy = load_cached(["SPY"], resolve_path(settings["data"]["cache_dir"])).get("SPY")
+    print(f"S&P 500 members from {since}: {len(data)} stocks with prices, {risk.max_positions} positions, "
+          f"{seeds} random slot orders" + (f", max {max_per_sector} per sector" if max_per_sector else ""))
+    if spy is not None:
+        sp = spy["close"][spy.index >= start]
+        r = sp.pct_change().dropna()
+        yrs = (sp.index[-1] - sp.index[0]).days / 365.25
+        print(f"  {'SPY buy & hold':14s} {(sp.iloc[-1] / sp.iloc[0]) ** (1 / yrs) - 1:+6.1%}/yr  worst drop "
+              f"{max_drawdown(sp):4.0%}  Sharpe {r.mean() / r.std() * math.sqrt(252):.2f}")
+    rows = []
+    for name in strategies:
+        cagr, dd, sh = [], [], []
+        for seed in range(seeds):
+            rng = np.random.default_rng(seed)
+            prio = {k: pd.Series(rng.random(len(df)), index=df.index) for k, df in data.items()}
+            m = run_portfolio_backtest(data, get_strategy(name), capital, risk, costs["commission"], costs["slippage"],
+                                       start=start, entry_allowed=mask, priority=prio, sector_of=u.sectors(),
+                                       max_per_sector=max_per_sector).metrics
+            cagr.append(m["cagr"]); dd.append(m["max_drawdown"]); sh.append(m["sharpe"])
+        row = dict(strategy=name, cagr=float(np.mean(cagr)), cagr_min=min(cagr), cagr_max=max(cagr),
+                   maxdd=float(np.mean(dd)), worst_dd=min(dd), sharpe=float(np.mean(sh)), sharpe_sd=float(np.std(sh)))
+        rows.append(row)
+        print(f"  {name:14s} {row['cagr']:+6.1%}/yr (range {row['cagr_min']:+.1%} to {row['cagr_max']:+.1%})  "
+              f"worst drop {row['maxdd']:4.0%}  Sharpe {row['sharpe']:.2f} ± {row['sharpe_sd']:.2f}")
+    return pd.DataFrame(rows)
+
+
 def cmd_research(args, settings) -> int:
     strategies = list(REGISTRY) if args.strategy == "all" else [args.strategy]
+    if args.universe == "sp500":
+        out = run_sp500(settings, strategies, args.since, args.seeds, args.max_per_sector)
+        if args.csv:
+            out.to_csv(args.csv, index=False)
+        return 0
     presets = list(PRESETS) if args.matrix else [p.strip() for p in args.filters.split(",")]
     unknown = [p for p in presets if p not in PRESETS]
     if unknown:
@@ -122,6 +181,11 @@ def add_parser(sub) -> None:
     sp.add_argument("--test-months", type=int, default=6)
     sp.add_argument("--folds", action="store_true", help="print each fold's chosen parameters")
     sp.add_argument("--csv", help="save results (one file per market)")
+    sp.add_argument("--universe", choices=["watchlist", "sp500"], default="watchlist",
+                    help="sp500: point-in-time S&P 500 members (run `tradebot universe update` first)")
+    sp.add_argument("--since", default="2014-01-02", help="sp500 test start date")
+    sp.add_argument("--seeds", type=int, default=5, help="sp500: random slot orders per strategy")
+    sp.add_argument("--max-per-sector", type=int, help="sp500: sector cap")
 
 
 __all__ = ["PRESETS", "run_research", "cmd_research", "add_parser", "load_universe", "summarize", "load_settings"]

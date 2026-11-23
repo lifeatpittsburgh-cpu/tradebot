@@ -19,11 +19,12 @@ from ..risk import RiskConfig, affordable_qty, plan_long
 
 class PaperBroker:
     def __init__(self, path, starting_capital: Dict[str, float], costs: Dict[str, Dict[str, float]],
-                 risk: Optional[RiskConfig] = None) -> None:
+                 risk: Optional[RiskConfig] = None, sectors: Optional[Dict[str, str]] = None) -> None:
         self.path = Path(path)
         self.starting_capital = starting_capital
         self.costs = costs
         self.risk = risk or RiskConfig()
+        self.sectors = sectors or {}
         self.ledger: Dict[str, Any] = self._load()
         self.events: List[str] = []  # human-readable log of what happened this run
 
@@ -120,6 +121,12 @@ class PaperBroker:
         if held >= self.risk.max_positions:
             self.events.append(f"SKIPPED BUY {symbol}: already holding {held} positions in {market}")
             return
+        sector = self.sectors.get(symbol)
+        if self.risk.max_per_sector and sector:
+            in_sector = sum(1 for s in self.positions if self.sectors.get(s) == sector)
+            if in_sector >= self.risk.max_per_sector:
+                self.events.append(f"SKIPPED BUY {symbol}: already holding {in_sector} {sector} positions")
+                return
         fill = float(open_px) * (1 + slippage)
         step = QTY_STEP.get(market, 1.0)
         plan = plan_long(fill, float(order["atr"]), self.equity(market), self.risk, step)

@@ -77,6 +77,29 @@ test periods next to the default settings and buy & hold. Filter presets: `none`
 `rs` (top half of the watchlist by 6-month return), `regime+rs`, `volume`. Results so far are
 in `docs/PROJECT_PLAN.md`.
 
+**Survivorship-free test on the S&P 500.** Testing today's winners over the past flatters every
+strategy. `tradebot universe update` rebuilds which stocks were in the S&P 500 each quarter since
+2013 (from Wikipedia's page history, a few minutes once) and downloads their prices into
+`data_cache/sp500/` (needs `pip install -e ".[research]"`). Then:
+
+```bash
+tradebot research --universe sp500 -s all --seeds 5          # every strategy vs SPY
+tradebot research --universe sp500 -s sma_crossover --max-per-sector 2
+```
+
+**Fundamentals screen** for a long-term watchlist: ranks S&P 500 stocks against others in their
+sector on quality (ROE, margin), growth (revenue, earnings), value (forward earnings yield) and
+safety (low debt). Current Yahoo figures, cached 7 days; it favours companies at peak earnings
+(e.g. cyclicals), so treat it as a list to research, not a buy list.
+
+```bash
+tradebot screen                                  # top 25 overall
+tradebot screen --sector "Health Care" --top 10
+```
+
+**Sector cap:** set `risk.max_per_sector` (e.g. 2) in `config/settings.yaml` to limit open positions
+per sector in paper trading and backtests; sectors come from the `sectors:` list there.
+
 **When to run:** US daily candles are final after 4:00pm ET; crypto candles close at
 00:00 UTC. Until then TradeBot ignores today's unfinished candle, so running it mid-day
 gives you yesterday's signals. Orders from a signal fill at the next candle's open.
@@ -88,10 +111,14 @@ gives you yesterday's signals. Orders from a signal fill at the next candle's op
 
 | Name | Buy | Sell |
 |---|---|---|
-| `sma_crossover` | SMA20 crosses above SMA50, price above SMA200 | SMA20 crosses below SMA50 |
+| `sma_crossover` (default for US) | SMA20 crosses above SMA50, price above SMA200 | SMA20 crosses below SMA50 |
 | `rsi_reversion` | RSI(14) recovers above 30 while price above SMA200 | RSI rises above 65 |
-| `macd_trend` (default) | MACD crosses above signal, price above EMA100 | MACD crosses below signal |
+| `macd_trend` (default for crypto) | MACD crosses above signal, price above EMA100 | MACD crosses below signal |
 | `composite` | 2 of the 3 above are 'long' at once | all 3 have turned flat |
+
+Each market can use its own strategy: `strategy.by_market` in `config/settings.yaml` (US uses
+SMA crossover, crypto MACD trend; see `docs/PROJECT_PLAN.md` for why). `--strategy` on the
+command line, or the dashboard's strategy picker, overrides it.
 
 Every position also has an ATR-based **stop-loss** (2×ATR below entry) and a
 **target** (2× the risk above entry). Position size risks 1% of the account per trade,

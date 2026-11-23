@@ -36,9 +36,11 @@ watchlists:
     - ^NSEI          # Nifty 50 index: scanned for reference, never traded
 
 strategy:
-  name: macd_trend         # sma_crossover | rsi_reversion | macd_trend | composite
-                           # macd_trend: best out-of-sample in walk-forward tests (docs/PROJECT_PLAN.md)
-  params: {}               # overrides for the chosen strategy's defaults
+  name: sma_crossover      # default: sma_crossover | rsi_reversion | macd_trend | composite
+  params: {}               # overrides for the default strategy's settings
+  by_market:               # per-market choices (markets not listed use `name`)
+    us: sma_crossover      # best on the survivorship-free S&P 500 test (docs/PROJECT_PLAN.md)
+    crypto: macd_trend     # best on the crypto watchlist walk-forward test
 
 data:
   lookback_days: 500       # history fetched for scans
@@ -52,6 +54,19 @@ risk:
   reward_risk: 2.0         # target = entry + 2 * (entry - stop)
   max_position_pct: 0.20   # never put more than 20% of the account in one stock
   max_positions: 8         # most stocks held at once per account
+  max_per_sector: null     # most open positions in one sector (uses `sectors:` below); null = no cap.
+                           # On the S&P 500 test, 2 per sector cut SMA crossover's worst drop but not MACD's.
+
+# GICS sector of each stock, for risk.max_per_sector. Symbols not listed are never capped.
+sectors:
+  AAPL: Information Technology
+  MSFT: Information Technology
+  NVDA: Information Technology
+  GOOGL: Communication Services
+  META: Communication Services
+  AMZN: Consumer Discretionary
+  JPM: Financials
+  XOM: Energy
 
 backtest:
   years: 5

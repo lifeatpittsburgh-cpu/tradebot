@@ -14,6 +14,7 @@ class RiskConfig:
     reward_risk: float = 2.0
     max_position_pct: float = 0.20
     max_positions: int = 8
+    max_per_sector: Optional[int] = None   # most open positions per sector (needs `sectors:`); None = no cap
 
     @classmethod
     def from_settings(cls, settings: Dict[str, Any]) -> "RiskConfig":
