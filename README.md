@@ -229,6 +229,10 @@ trades within about 0.1% of USD. Yahoo has no 2h/4h bars, so they are built from
 crypto bars are aligned to 00:00 UTC, stock bars to the 9:30 open. The chart's *Period* only
 changes what's displayed: signals always use the full history the indicators need.
 
+Times in alerts and on intraday charts follow the **Time zone** picked in the dashboard
+sidebar (saved in `state/preferences.json`). The default, *Market's own*, is UTC for crypto and
+New York time for US stocks; *Local* is this computer's time zone.
+
 These are prompts to look at a chart, not tested trades. The strategies were tested on daily
 candles, and the 5m/1h backtest lost to daily after costs. Chart alerts never touch the paper
 account or Alpaca. The list lives in `state/watchlist.json`.

@@ -33,6 +33,7 @@ from tradebot.services import (DISCLAIMER, accounts_frame, broker_from, history_
 from tradebot.daily import load_last_run  # noqa: E402
 from tradebot.strategies import REGISTRY  # noqa: E402
 from tradebot import watch as chart_alerts  # noqa: E402
+from tradebot import timezones  # noqa: E402
 
 LOCAL_TZ = datetime.now().astimezone().tzinfo
 
@@ -119,6 +120,14 @@ with st.sidebar:
                                  help="Rules used for signals, charts and backtests. Defaults to the strategy "
                                       "configured for this market (strategy.by_market in settings.yaml).")
     st.caption(REGISTRY[strategy_name].__doc__.strip().split("\n\n")[0].replace("\n", " "))
+    saved_tz = timezones.load_pref()
+    tz_choices = timezones.CHOICES if saved_tz in timezones.CHOICES else timezones.CHOICES + [saved_tz]
+    tz_pref = st.selectbox("Time zone", tz_choices, index=tz_choices.index(saved_tz),
+                           format_func=timezones.choice_label,
+                           help="Times on intraday charts and in Telegram chart alerts. *Market's own* shows crypto in "
+                                "UTC and US stocks in New York time. Saved for next time.")
+    if tz_pref != saved_tz:
+        timezones.save_pref(tz_pref)
     if st.button("🔄 Refresh market data", width="stretch",
                  help="Re-download prices now instead of using the cached copy."):
         st.session_state.nonce += 1
@@ -225,10 +234,12 @@ def _intraday_chart(symbol: str, interval: str, days: int, label: str) -> None:
             display_from = df.index[-1] - pd.Timedelta(hours=24)
     shown = df[df.index >= display_from]
     last, first = shown["close"].iloc[-1], shown["open"].iloc[0]
-    tz = {"us": "New York", "india": "India", "crypto": "UTC"}.get(sym_market, "")
+    zone = timezones.resolve(tz_pref, sym_market)
+    tz = timezones.label(zone)
     k1, k2, k3, k4 = st.columns(4)
+    latest = timezones.convert_ts(df.index[-1], sym_market, zone)
     k1.metric("Last", f"{fmt_price(last)}", f"{last / first - 1:+.2%} over {label}", border=True,
-              help=f"Latest {interval} bar at {df.index[-1]:%Y-%m-%d %H:%M} ({tz} time). It may still be forming.")
+              help=f"Latest {interval} bar at {latest:%Y-%m-%d %H:%M} ({tz} time). It may still be forming.")
     k2.metric("High", f"{fmt_price(shown['high'].max())}", border=True, help=f"Highest price over {label}")
     k3.metric("Low", f"{fmt_price(shown['low'].min())}", border=True, help=f"Lowest price over {label}")
     k4.metric(f"RSI ({interval})", f"{ind.rsi(df['close']).iloc[-1]:.0f}", border=True,
@@ -246,8 +257,9 @@ def _intraday_chart(symbol: str, interval: str, days: int, label: str) -> None:
             f"{len(shown):,} candles over {label}. ")
     st.caption(f"{view}{interval} candles, {tz} time. Indicators are computed on {interval} bars "
                f"(SMA 20 = last 20 bars). Yahoo data can lag a few minutes.")
-    fig = price_chart(df, sigs, sym_market, display_from=display_from, intraday=True,
-                      initial_bars=MAX_VIEW_BARS)
+    fig = price_chart(timezones.convert(df, sym_market, zone), timezones.convert(sigs, sym_market, zone),
+                      sym_market, display_from=timezones.convert_ts(display_from, sym_market, zone),
+                      intraday=True, initial_bars=MAX_VIEW_BARS)
     show_price_chart(fig)
 
 
