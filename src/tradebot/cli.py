@@ -366,10 +366,28 @@ def cmd_schedule(args, settings) -> int:
         for note in schedule.timing_notes(time_str, tz):
             print("  " + note)
         print(f"Job file: {path}\nLog:      {schedule.LOG_PATH}")
-        print("It checks every 5 minutes (also for chart alerts, see `tradebot watch`), so a run missed while the Mac slept or was off happens soon after "
-              "it wakes. Remove it with `tradebot schedule uninstall`.")
+        print("It checks every 5 minutes (also for chart alerts, see `tradebot watch`), so a run missed while the "
+              "computer slept or was off happens soon after it wakes. Remove it with `tradebot schedule uninstall`.")
+        if schedule.backend() == "systemd":
+            if schedule.enable_linger():
+                print("Linger is on: the job keeps running after reboot with nobody logged in.")
+            else:
+                print("!! Couldn't turn on linger, so the job stops when you log out. Run once:\n"
+                      "     sudo loginctl enable-linger $USER")
     elif args.action == "uninstall":
         print("Removed the scheduled job." if schedule.uninstall() else "No scheduled job was installed.")
+    elif args.action == "install-dashboard":
+        path = schedule.install_dashboard(args.port)
+        import socket
+
+        print(f"Dashboard service installed and started: {path}")
+        print(f"  Open http://{socket.gethostname()}.local:{args.port} (or http://<this computer's IP>:{args.port}) "
+              "from any device on your home network.")
+        print("  It restarts if it crashes and starts at boot"
+              + ("." if schedule.enable_linger() else " once linger is on (sudo loginctl enable-linger $USER)."))
+        print("  It has no password: keep it on your home network, never forward the port on your router.")
+    elif args.action == "uninstall-dashboard":
+        print("Removed the dashboard service." if schedule.uninstall_dashboard() else "No dashboard service was installed.")
     elif args.action == "run-now":
         schedule.run_now()
         print(f"Started. Follow it with:  tail -f {schedule.LOG_PATH}")
@@ -389,7 +407,9 @@ def cmd_schedule(args, settings) -> int:
             nxt = schedule.next_slot(now, time_str, tz).astimezone()
             print(f"Installed: once a day after {time_str} {tz} ({'loaded' if info['loaded'] else 'NOT loaded'})")
             print("  " + ("Due now: it will run at the next 5-minute check." if due
-                          else f"Next run: {nxt:%a %d %b %H:%M} on this Mac's clock."))
+                          else f"Next run: {nxt:%a %d %b %H:%M} on this computer's clock."))
+            if info.get("linger") is False:
+                print("  !! Linger is off: the job stops when you log out. Run: sudo loginctl enable-linger $USER")
             if info.get("check_every") and info["check_every"] != schedule.CHECK_EVERY_SECONDS:
                 print(f"  Checks every {info['check_every'] // 60} min. Run `tradebot schedule install` again "
                       f"to check every {schedule.CHECK_EVERY_SECONDS // 60} min (needed for timely chart alerts).")
@@ -400,6 +420,9 @@ def cmd_schedule(args, settings) -> int:
             when = datetime.fromisoformat(last.get("finished") or last["started"]).astimezone()
             print(f"Last daily run: {when:%a %d %b %H:%M}, {'ok' if last.get('ok') else 'FAILED'}, "
                   f"{len(last.get('new_signals', []))} new signal(s), {len(last.get('errors', {}))} error(s)")
+        dash = schedule.dashboard_status()
+        if dash:
+            print(f"Dashboard service: {dash.get('ActiveState', '?')} ({dash.get('SubState', '?')})")
         print(f"Log: {schedule.LOG_PATH}")
     return 0
 
@@ -528,8 +551,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_ai_parser(sub)
 
-    sp = sub.add_parser("schedule", help="run `tradebot daily` automatically every day (macOS)")
-    sp.add_argument("action", choices=["install", "status", "run-now", "uninstall"])
+    sp = sub.add_parser("schedule", help="run `tradebot daily` automatically every day (macOS launchd or Linux systemd)")
+    sp.add_argument("action", choices=["install", "status", "run-now", "uninstall",
+                                       "install-dashboard", "uninstall-dashboard"],
+                    help="install-dashboard / uninstall-dashboard: keep the dashboard running (Linux, e.g. Raspberry Pi)")
+    sp.add_argument("--port", type=int, default=8501, help="dashboard port for install-dashboard (default 8501)")
     sp.add_argument("--time", help="HH:MM, 24-hour (default: schedule.time in settings, 20:15)")
     sp.add_argument("--timezone", help="timezone of --time (default: schedule.timezone, America/New_York)")
     return p

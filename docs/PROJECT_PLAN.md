@@ -130,7 +130,7 @@ tradingbot/
 - [x] Telegram chart alerts for chosen symbols and bar sizes (15m–4h), once per closed bar (#8)
 - [x] Chart period fixes, time-zone choice, Live refresh switch (#9–#11)
 - [x] AI market study: Claude rates news and market mood daily; can hold back BUYs, never adds trades
-- [ ] Raspberry Pi 5: Linux scheduler (systemd), dashboard service, setup guide
+- [x] Raspberry Pi 5: Linux scheduler (systemd user timer), dashboard service, setup guide (docs/RASPBERRY_PI.md)
 
 ## Results log
 
