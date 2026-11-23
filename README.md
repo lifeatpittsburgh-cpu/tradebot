@@ -170,7 +170,7 @@ applies stops and targets, queues orders from new signals) and sends an alert li
 BUY/SELL signals and paper-account changes. Each signal is alerted once: running it again the
 same evening, on a weekend or on a market holiday sends nothing for candles already covered.
 
-**Run it automatically every day (macOS):**
+**Run it automatically every day (macOS, or Linux such as a Raspberry Pi):**
 
 ```bash
 tradebot schedule install          # once a day after 20:15 New York time (schedule: in settings.yaml)
@@ -185,6 +185,10 @@ per evening, so a run missed while the Mac was asleep or off happens soon after 
 failed run (e.g. no internet) is retried, with one failure alert. The output goes to
 `state/logs/daily.log`, and the Paper portfolio tab shows the last run.
 
+On Linux the same commands install a systemd user timer instead, and
+`tradebot schedule install-dashboard` keeps the dashboard running. To move the job to a Raspberry
+Pi so the Mac can sleep, follow [docs/RASPBERRY_PI.md](docs/RASPBERRY_PI.md).
+
 > The project must not live in `~/Documents`, `~/Desktop` or `~/Downloads`: macOS blocks
 > background jobs from reading those folders, so the scheduled run would fail.
 
@@ -193,7 +197,7 @@ failed run (e.g. no internet) is retried, with one failure alert. The output goe
 | Channel | Setup |
 |---|---|
 | `console` | none: printed to the terminal and the log |
-| `macos` | none: a notification banner on this Mac |
+| `macos` | none: a notification banner on this Mac (skipped on Linux) |
 | `telegram` | see below |
 
 **Telegram setup:**
