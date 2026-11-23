@@ -93,11 +93,22 @@ def run_portfolio_backtest(
     max_positions: Optional[int] = None,
     benchmark: Optional[pd.Series] = None,
     periods_per_year: Optional[int] = None,
+    start: Optional[pd.Timestamp] = None,
+    signals: Optional[Dict[str, pd.Series]] = None,
+    entry_allowed: Optional[Dict[str, pd.Series]] = None,
+    force_exit: Optional[pd.Series] = None,
 ) -> BacktestResult:
     """Backtest one strategy over several symbols sharing one cash account.
 
     `periods_per_year` annualizes the Sharpe ratio; it defaults to daily bars for the market,
     so pass it for intraday data (e.g. 365 * 24 for hourly crypto bars).
+
+    Research options (all off by default):
+      start          trade and measure only from this date; earlier bars just warm up indicators
+      signals        per-symbol signal series (1 / -1 / 0) to use instead of strategy.generate
+      entry_allowed  per-symbol boolean series by date: a BUY on a False day is dropped
+      force_exit     boolean series by date: on a True day every open position is sold at the
+                     next open and no new BUYs are taken (e.g. the market fell below its 200-day average)
     """
     risk = risk or RiskConfig()
     max_positions = max_positions or risk.max_positions
@@ -107,13 +118,33 @@ def run_portfolio_backtest(
     if not data:
         raise ValueError("no symbol has enough history for this strategy")
 
+    start_ts_arg = pd.Timestamp(start) if start is not None else None
+    if start_ts_arg is not None:
+        data = {s: df for s, df in data.items() if len(df) and df.index[-1] >= start_ts_arg}
+        if not data:
+            raise ValueError("no symbol has data after the start date")
+
+    def _aligned(series: Optional[pd.Series], index: pd.DatetimeIndex, fill) -> Optional[np.ndarray]:
+        if series is None:
+            return None
+        return series.reindex(index, method="ffill").fillna(fill).to_numpy()
+
     books: Dict[str, _Book] = {}
     all_signals: Dict[str, pd.DataFrame] = {}
+    allow: Dict[str, Optional[np.ndarray]] = {}
+    exit_all: Dict[str, Optional[np.ndarray]] = {}
+    blocked = 0
     for sym, df in data.items():
-        sigs = strategy.generate(df)
-        all_signals[sym] = sigs
+        if signals is not None and sym in signals:
+            sig_arr = signals[sym].reindex(df.index).fillna(0).astype(int).to_numpy()
+            all_signals[sym] = pd.DataFrame({"signal": sig_arr, "reason": ""}, index=df.index)
+        else:
+            all_signals[sym] = strategy.generate(df)
+            sig_arr = all_signals[sym]["signal"].to_numpy()
         books[sym] = _Book(df.index, *(df[c].to_numpy(dtype=float) for c in ("open", "high", "low", "close")),
-                           sigs["signal"].to_numpy(), ind.atr(df, risk.atr_period).to_numpy())
+                           sig_arr, ind.atr(df, risk.atr_period).to_numpy())
+        allow[sym] = _aligned((entry_allowed or {}).get(sym), df.index, True)
+        exit_all[sym] = _aligned(force_exit, df.index, False)
     order = list(books)  # watchlist order decides who gets a slot first
     pos_in_book = {s: {ts: i for i, ts in enumerate(b.index)} for s, b in books.items()}
     dates = sorted(set().union(*(b.index for b in books.values())))
@@ -184,11 +215,23 @@ def run_portfolio_backtest(
                 close_pos(sym, i, max(b.open[i], t.target), "target")
 
         # 4) Signals at the close.
+        trading = start_ts_arg is None or day >= start_ts_arg
         for sym, i in today.items():
             b = books[sym]
             last_close[sym] = b.close[i]
+            if not trading:
+                continue
             s = b.signal[i]
+            if exit_all[sym] is not None and exit_all[sym][i]:
+                if sym in positions:
+                    pending[sym] = {"side": "sell"}
+                elif s == 1:
+                    blocked += 1
+                continue
             if s == 1 and sym not in positions and sym not in pending:
+                if allow[sym] is not None and not allow[sym][i]:
+                    blocked += 1
+                    continue
                 pending[sym] = {"side": "buy", "atr": float(b.atr[i])}
             elif s == -1 and sym in positions:
                 pending[sym] = {"side": "sell"}
@@ -205,10 +248,16 @@ def run_portfolio_backtest(
     equity_s = pd.Series(equity, index=pd.DatetimeIndex(dates), name="equity")
     invested_s = pd.Series(invested, index=equity_s.index)
 
-    # Measure from the first day any symbol could trade (after indicator warm-up).
-    start_ts = min(b.index[min(strategy.warmup, len(b.index) - 1)] for b in books.values())
+    # Measure from the first day any symbol could trade (after indicator warm-up), or from `start`.
+    def first_bar(b: _Book) -> int:
+        i = min(strategy.warmup, len(b.index) - 1)
+        if start_ts_arg is not None:
+            i = max(i, min(int(b.index.searchsorted(start_ts_arg)), len(b.index) - 1))
+        return i
+
+    start_ts = min(b.index[first_bar(b)] for b in books.values())
     eq_eval = equity_s[equity_s.index >= start_ts]
-    bh = {s: float(b.close[-1] / b.close[min(strategy.warmup, len(b.close) - 1)] - 1) for s, b in books.items()}
+    bh = {s: float(b.close[-1] / b.close[first_bar(b)] - 1) for s, b in books.items()}
     metrics = compute_metrics(eq_eval, trades, invested_s[invested_s.index >= start_ts],
                               float(np.mean(list(bh.values()))),
                               periods_per_year or PERIODS_PER_YEAR.get(market, 252))
@@ -216,6 +265,7 @@ def run_portfolio_backtest(
         bm = benchmark[benchmark.index >= start_ts]
         metrics["benchmark_return"] = float(bm.iloc[-1] / bm.iloc[0] - 1) if len(bm) > 1 else 0.0
 
+    metrics["blocked_entries"] = float(blocked)
     per_symbol = _per_symbol(trades, bh)
     label = order[0] if len(order) == 1 else f"PORTFOLIO({len(order)})"
     sigs = all_signals[order[0]] if len(order) == 1 else pd.DataFrame()

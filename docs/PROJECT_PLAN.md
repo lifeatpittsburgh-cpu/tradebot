@@ -98,10 +98,14 @@ tradingbot/
 - [x] Intraday charts (1m / 5m / 15m / 1h) for viewing, with pan and time-only zoom that re-fits prices
 - [x] Intraday backtest (5m / 1h): loses to daily after costs, so signals stay on daily candles
 
-### Phase 4 — Strategy quality
-- [ ] Walk-forward / out-of-sample validation, parameter sweeps
-- [ ] Market-regime filter (index above 200-DMA, VIX / India VIX)
-- [ ] Volume and relative-strength filters, sector exposure limits
+### Phase 4 — Strategy quality (in progress)
+- [x] Walk-forward testing: tune on 3 years, test on the next 6 months, repeat; `tradebot research`
+- [x] Entry filters tested out of sample: market regime (index above 200-day average, optional
+      sell-all), relative strength (top half of the watchlist by 6-month return), volume
+- [x] Position-size test (risk per trade, cap per position)
+- [x] Live strategy switched to `macd_trend` (2026-11-22); position size unchanged (1% risk, 20% cap)
+- [ ] Wider, survivorship-free universe (e.g. S&P 500 members as of each date)
+- [ ] Sector exposure limits
 - [ ] Fundamentals screen for the long-term watchlist
 
 ### Phase 5 — Broker integration (optional, needs explicit opt-in)
@@ -146,6 +150,54 @@ strategy on daily candles over the same window, for comparison.
 - On daily candles, composite and sma_crossover (the two re-run that way) beat their intraday
   versions in every window.
   Conclusion: keep signals and paper trading on daily candles; use intraday charts for viewing only.
+
+**2026-11-22, walk-forward tests (Phase 4), daily candles, default watchlists and costs**
+
+Train 3 years, test the next 6 months, repeated; only the test periods count. Out-of-sample
+period: US 2018-09-14 to 2026-11-20, crypto 2018-06-11 to 2026-11-22.
+
+*Strategies, no filters, 1% risk per trade (tuned = best settings from each training window):*
+
+| Market | Strategy | Tuned | Default settings | Worst drop | Sharpe | Avg. invested |
+|---|---|---|---|---|---|---|
+| US | macd_trend | +106% | +90% | -12% | 1.05 | 37% |
+| US | composite | +67% | +82% | -13% | 0.78 | 34% |
+| US | sma_crossover | +12% | +46% | -11% | 0.38 | 10% |
+| US | rsi_reversion | +9% | -3% | -16% | 0.20 | 15% |
+| US | SPY buy & hold | +169% (12.8%/yr) | | -34% | 0.72 | 100% |
+| Crypto | macd_trend | +138% | +87% | -16% | 0.89 | 10% |
+| Crypto | composite | +55% | +51% | -13% | 0.70 | 6% |
+| Crypto | sma_crossover | +18% | +50% | -16% | 0.30 | 6% |
+| Crypto | rsi_reversion | -10% | -13% | -21% | -0.21 | 4% |
+| Crypto | BTC buy & hold | +770% (29.2%/yr) | | -77% | 0.73 | 100% |
+
+- **Filters don't help.** Regime, relative-strength and volume filters lowered out-of-sample
+  returns in almost every case (e.g. US composite, default settings: none +82%, regime +60%,
+  RS +52%, volume +53%). They cut drawdowns a little, but less than simply trading smaller.
+  The one exception, the regime filter with sell-all on crypto composite/sma (+5 to +8 points),
+  isn't consistent across strategies, so it stays off.
+- **Tuning doesn't reliably help.** Walk-forward tuning beat the default settings for MACD in
+  both markets, but lost badly for SMA crossover in both and for composite in the US. Keep the
+  defaults; don't auto-tune.
+- **MACD trend is the strongest strategy out of sample** in both markets, with a better Sharpe
+  than buy & hold (1.05 vs 0.72 US; 0.89 vs 0.73 crypto) at a third or less of the drawdown.
+- **The gap to buy & hold is mostly cash.** At 1% risk per trade the account is only 37% invested
+  (US) or 10% (crypto). Larger positions scale return and drawdown together (Sharpe stays
+  about the same), so position size is a risk choice, not an edge:
+
+| Strategy (default settings) | Risk / cap | Return | Per year | Worst drop | Sharpe |
+|---|---|---|---|---|---|
+| US composite | 1% / 20% (current) | +82% | 7.6% | -10% | 0.87 |
+| US composite | 2% / 35% | +139% | 11.2% | -19% | 0.87 |
+| US composite | 3% / 50% | +169% | 12.8% | -21% | 0.87 |
+| US macd_trend | 3% / 50% | +175% | 13.1% | -30% | 0.88 |
+| Crypto macd_trend | 1% / 20% (current) | +87% | 7.7% | -19% | 0.70 |
+| Crypto macd_trend | 2% / 35% | +221% | 14.8% | -34% | 0.79 |
+| Crypto macd_trend | 3% / 35% | +313% | 18.3% | -38% | 0.80 |
+
+- Caveats: one 8-year period with a strong bull market; 9 symbols per market picked today
+  (survivorship bias: the equal-weight buy & hold of these symbols made +443% US, +1,532% crypto);
+  position sizes were compared on the same period they're reported on.
 
 ## Known limits
 - yfinance is unofficial and rate-limited; good for prototyping, not production. Swap

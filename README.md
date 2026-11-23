@@ -66,7 +66,16 @@ tradebot dashboard                           # web dashboard on http://localhost
 tradebot daily                               # end-of-day job: paper update + alerts on new signals
 tradebot alerts test                         # send a test alert to every enabled channel
 tradebot schedule install|status|run-now|uninstall   # run `tradebot daily` automatically
+tradebot research -m us -s all --matrix      # walk-forward test every strategy × entry filter
+tradebot research -m crypto -s macd_trend --folds   # one strategy, show each fold's settings
 ```
+
+**Walk-forward research** (`tradebot research`) tunes each strategy on 3 years of history,
+tests it on the next 6 months, steps forward and repeats, then reports only those unseen
+test periods next to the default settings and buy & hold. Filter presets: `none`, `regime`
+(index above its 200-day average), `regime+exit` (also sell everything when it drops below),
+`rs` (top half of the watchlist by 6-month return), `regime+rs`, `volume`. Results so far are
+in `docs/PROJECT_PLAN.md`.
 
 **When to run:** US daily candles are final after 4:00pm ET; crypto candles close at
 00:00 UTC. Until then TradeBot ignores today's unfinished candle, so running it mid-day
@@ -81,8 +90,8 @@ gives you yesterday's signals. Orders from a signal fill at the next candle's op
 |---|---|---|
 | `sma_crossover` | SMA20 crosses above SMA50, price above SMA200 | SMA20 crosses below SMA50 |
 | `rsi_reversion` | RSI(14) recovers above 30 while price above SMA200 | RSI rises above 65 |
-| `macd_trend` | MACD crosses above signal, price above EMA100 | MACD crosses below signal |
-| `composite` (default) | 2 of the 3 above are 'long' at once | all 3 have turned flat |
+| `macd_trend` (default) | MACD crosses above signal, price above EMA100 | MACD crosses below signal |
+| `composite` | 2 of the 3 above are 'long' at once | all 3 have turned flat |
 
 Every position also has an ATR-based **stop-loss** (2×ATR below entry) and a
 **target** (2× the risk above entry). Position size risks 1% of the account per trade,
