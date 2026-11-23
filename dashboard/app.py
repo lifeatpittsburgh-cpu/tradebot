@@ -171,15 +171,17 @@ with tab_signals:
 CHART_PERIODS = {
     "1m": [("1D", 1), ("2D", 2), ("5D", 5), ("7D", 7)],
     "5m": [("1D", 1), ("5D", 5), ("1M", 30), ("2M", 60)],
-    "15m": [("5D", 5), ("1M", 30), ("2M", 60)],
-    "30m": [("5D", 5), ("1M", 30), ("2M", 60)],
-    "1h": [("1M", 30), ("3M", 92), ("6M", 183), ("1Y", 365), ("2Y", 730)],
+    "15m": [("1D", 1), ("5D", 5), ("1M", 30), ("2M", 60)],
+    "30m": [("1D", 1), ("5D", 5), ("1M", 30), ("2M", 60)],
+    "1h": [("1D", 1), ("5D", 5), ("1M", 30), ("3M", 92), ("6M", 183), ("1Y", 365), ("2Y", 730)],
     "2h": [("1D", 1), ("5D", 5), ("1M", 30), ("3M", 92), ("1Y", 365), ("2Y", 730)],
     "4h": [("5D", 5), ("1M", 30), ("3M", 92), ("1Y", 365), ("2Y", 730)],
     "1D": [("3M", 92), ("6M", 183), ("1Y", 365), ("2Y", 730), ("5Y", 1826)],
 }
-INTRADAY_VIEW_BARS = 120  # intraday charts open on the latest 120 candles; drag left for the rest of the period
-DEFAULT_PERIOD = {"1m": "1D", "5m": "5D", "15m": "1M", "30m": "1M", "1h": "3M", "2h": "3M", "4h": "1Y", "1D": "1Y"}
+# Intraday charts open on the whole period chosen, unless that's more candles than fit legibly:
+# then on the latest MAX_VIEW_BARS (drag left or double-click for the rest of the period).
+MAX_VIEW_BARS = 200
+DEFAULT_PERIOD = {"1m": "1D", "5m": "1D", "15m": "5D", "30m": "5D", "1h": "5D", "2h": "1M", "4h": "1M", "1D": "1Y"}
 CHART_SOURCE = {"2h": "1h", "4h": "1h"}  # Yahoo has no 2h/4h bars: built from 1h bars
 
 
@@ -239,10 +241,13 @@ def _intraday_chart(symbol: str, interval: str, days: int, label: str) -> None:
         alert_toggle(symbol, interval, strategy_name)
     sigs = strategy_from(settings, strategy_name).generate(df) if show_sigs else pd.DataFrame(
         {"signal": 0, "reason": ""}, index=df.index)
-    st.caption(f"{interval} candles, {tz} time. Indicators are computed on {interval} bars "
+    view = (f"Showing the latest {MAX_VIEW_BARS} of the {len(shown):,} candles in {label}: drag left "
+            "or zoom out to see the rest. " if len(shown) > MAX_VIEW_BARS else
+            f"{len(shown):,} candles over {label}. ")
+    st.caption(f"{view}{interval} candles, {tz} time. Indicators are computed on {interval} bars "
                f"(SMA 20 = last 20 bars). Yahoo data can lag a few minutes.")
     fig = price_chart(df, sigs, sym_market, display_from=display_from, intraday=True,
-                      initial_bars=INTRADAY_VIEW_BARS)
+                      initial_bars=MAX_VIEW_BARS)
     show_price_chart(fig)
 
 
