@@ -97,6 +97,9 @@ def run_portfolio_backtest(
     signals: Optional[Dict[str, pd.Series]] = None,
     entry_allowed: Optional[Dict[str, pd.Series]] = None,
     force_exit: Optional[pd.Series] = None,
+    priority: Optional[Dict[str, pd.Series]] = None,
+    sector_of: Optional[Dict[str, str]] = None,
+    max_per_sector: Optional[int] = None,
 ) -> BacktestResult:
     """Backtest one strategy over several symbols sharing one cash account.
 
@@ -109,9 +112,14 @@ def run_portfolio_backtest(
       entry_allowed  per-symbol boolean series by date: a BUY on a False day is dropped
       force_exit     boolean series by date: on a True day every open position is sold at the
                      next open and no new BUYs are taken (e.g. the market fell below its 200-day average)
+      priority       per-symbol score by date; when BUYs compete for free slots, the highest
+                     score on the signal day fills first (default: watchlist order)
+      sector_of      symbol -> sector; with `max_per_sector`, a BUY is skipped while that many
+                     positions in its sector are already open
     """
     risk = risk or RiskConfig()
     max_positions = max_positions or risk.max_positions
+    max_per_sector = max_per_sector or risk.max_per_sector
     market = market_of(next(iter(data))) if data else "us"
     step = QTY_STEP.get(market, 1.0)
     data = {s: df for s, df in data.items() if len(df) > strategy.warmup + 1}
@@ -133,7 +141,9 @@ def run_portfolio_backtest(
     all_signals: Dict[str, pd.DataFrame] = {}
     allow: Dict[str, Optional[np.ndarray]] = {}
     exit_all: Dict[str, Optional[np.ndarray]] = {}
-    blocked = 0
+    prio: Dict[str, Optional[np.ndarray]] = {}
+    blocked = sector_skipped = 0
+    sectors = sector_of or {}
     for sym, df in data.items():
         if signals is not None and sym in signals:
             sig_arr = signals[sym].reindex(df.index).fillna(0).astype(int).to_numpy()
@@ -145,6 +155,7 @@ def run_portfolio_backtest(
                            sig_arr, ind.atr(df, risk.atr_period).to_numpy())
         allow[sym] = _aligned((entry_allowed or {}).get(sym), df.index, True)
         exit_all[sym] = _aligned(force_exit, df.index, False)
+        prio[sym] = _aligned((priority or {}).get(sym), df.index, float("-inf"))
     order = list(books)  # watchlist order decides who gets a slot first
     pos_in_book = {s: {ts: i for i, ts in enumerate(b.index)} for s, b in books.items()}
     dates = sorted(set().union(*(b.index for b in books.values())))
@@ -182,16 +193,24 @@ def run_portfolio_backtest(
                 if sym in positions:
                     close_pos(sym, i, books[sym].open[i], "signal")
 
-        # 2) Entries, sized off equity at the latest known closes.
-        for sym, i in today.items():
-            if pending.get(sym, {}).get("side") != "buy":
-                continue
+        # 2) Entries, sized off equity at the latest known closes. Strongest priority first.
+        buys = [s for s in today if pending.get(s, {}).get("side") == "buy"]
+        if priority is not None and len(buys) > 1:
+            buys.sort(key=lambda s: -pending[s].get("prio", float("-inf")))
+        for sym in buys:
+            i = today[sym]
             order_ = pending.pop(sym)
             if sym in positions:
                 continue
             if len(positions) >= max_positions:
                 skipped += 1
                 continue
+            if max_per_sector and sectors.get(sym):
+                held = sum(1 for p in positions if sectors.get(p) == sectors[sym])
+                if held >= max_per_sector:
+                    skipped += 1
+                    sector_skipped += 1
+                    continue
             fill = books[sym].open[i] * (1 + slippage)
             plan = plan_long(fill, order_["atr"], mark_to_market(), risk, step)
             qty = affordable_qty(plan.quantity, fill, cash, commission, step) if plan else 0.0
@@ -233,6 +252,8 @@ def run_portfolio_backtest(
                     blocked += 1
                     continue
                 pending[sym] = {"side": "buy", "atr": float(b.atr[i])}
+                if prio[sym] is not None:
+                    pending[sym]["prio"] = float(prio[sym][i])
             elif s == -1 and sym in positions:
                 pending[sym] = {"side": "sell"}
 
@@ -266,6 +287,8 @@ def run_portfolio_backtest(
         metrics["benchmark_return"] = float(bm.iloc[-1] / bm.iloc[0] - 1) if len(bm) > 1 else 0.0
 
     metrics["blocked_entries"] = float(blocked)
+    metrics["sector_skipped"] = float(sector_skipped)
+    metrics["skipped_entries"] = float(skipped)
     per_symbol = _per_symbol(trades, bh)
     label = order[0] if len(order) == 1 else f"PORTFOLIO({len(order)})"
     sigs = all_signals[order[0]] if len(order) == 1 else pd.DataFrame()

@@ -32,12 +32,20 @@ from .services import (DISCLAIMER, accounts_frame, broker_from, pending_frame, p
                        provider_from, run_paper_update, signals_frame, strategy_from, symbols_for)
 from .strategies import REGISTRY, get_strategy
 
-def _strategy_from(args, settings):
+def _strategy_from(args, settings, market=None):
+    """--strategy / --param from the command line, else the strategy configured for `market`."""
     params = {}
     for kv in getattr(args, "param", None) or []:
         k, v = kv.split("=", 1)
         params[k] = yaml.safe_load(v)  # "20" -> 20, "1.5" -> 1.5, "false" -> False
-    return strategy_from(settings, args.strategy, params)
+    return strategy_from(settings, args.strategy, params, market=market)
+
+
+def _explicit_strategy(args, settings):
+    """A strategy only when the user chose one; None means each market uses its configured one."""
+    if getattr(args, "strategy", None) or getattr(args, "param", None):
+        return _strategy_from(args, settings)
+    return None
 
 
 def _symbols(args, settings) -> List[str]:
@@ -59,13 +67,21 @@ def cmd_strategies(args, settings) -> int:
 
 
 def cmd_scan(args, settings) -> int:
-    strategy = _strategy_from(args, settings)
+    explicit = _explicit_strategy(args, settings)
     risk = RiskConfig.from_settings(settings)
     capital = settings["paper"]["starting_capital"]
     symbols = _symbols(args, settings)
-    print(f"Scanning {len(symbols)} symbols with {strategy!r} ...")
-    signals, errors = scan(symbols, _provider(settings), strategy, risk,
-                           settings["data"]["lookback_days"], equity_by_market=capital)
+    groups: Dict[str, List[str]] = {}
+    for s in symbols:
+        groups.setdefault(market_of(s), []).append(s)
+    signals, errors = [], {}
+    for market, syms in groups.items():
+        strategy = explicit or _strategy_from(args, settings, market)
+        print(f"Scanning {len(syms)} {market} symbols with {strategy!r} ...")
+        sigs, errs = scan(syms, _provider(settings), strategy, risk,
+                          settings["data"]["lookback_days"], equity_by_market=capital)
+        signals += sigs
+        errors.update(errs)
 
     table = signals_frame(signals)
     if not table.empty:
@@ -157,7 +173,7 @@ def cmd_backtest(args, settings) -> int:
         bm_data, _ = _load_many(provider, [bm_symbol], start, end)
         benchmark = bm_data.get(bm_symbol, pd.DataFrame()).get("close")
 
-    strategies = [get_strategy(n) for n in REGISTRY] if args.compare else [_strategy_from(args, settings)]
+    strategies = [get_strategy(n) for n in REGISTRY] if args.compare else [_strategy_from(args, settings, market)]
     first = min(df.index[0] for df in data.values()).date()
     last = max(df.index[-1] for df in data.values()).date()
     print(f"\n{len(data)} symbol(s), {first} -> {last}, {CURRENCY[market]} {capital:,.0f}, "
@@ -168,7 +184,8 @@ def cmd_backtest(args, settings) -> int:
         try:
             results.append(run_portfolio_backtest(
                 data, strat, capital, risk, costs["commission"], costs["slippage"],
-                max_positions=1 if len(data) == 1 else None, benchmark=benchmark))
+                max_positions=1 if len(data) == 1 else None, benchmark=benchmark,
+                sector_of=settings.get("sectors") or {}))
         except ValueError as exc:
             print(f"!! {strat.name}: {exc}", file=sys.stderr)
 
@@ -221,7 +238,8 @@ def cmd_paper(args, settings) -> int:
         print(f"Paper ledger reset: {broker.path}")
         return 0
     if args.action == "run":
-        signals, errors = run_paper_update(settings, broker, _symbols(args, settings), _strategy_from(args, settings))
+        signals, errors = run_paper_update(settings, broker, _symbols(args, settings),
+                                           _explicit_strategy(args, settings))
         for sym, err in errors.items():
             print(f"!! {sym}: {err}", file=sys.stderr)
         notify(signals, settings, broker.events)
@@ -365,6 +383,18 @@ def cmd_schedule(args, settings) -> int:
     return 0
 
 
+def _cmd_universe(args, settings) -> int:
+    from .universe import cmd_universe
+
+    return cmd_universe(args, settings)
+
+
+def _cmd_screen(args, settings) -> int:
+    from .fundamentals import cmd_screen
+
+    return cmd_screen(args, settings)
+
+
 def _cmd_research(args, settings) -> int:
     from .research.report import cmd_research
 
@@ -442,9 +472,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("alerts", help="test alert channels or set up Telegram")
     sp.add_argument("action", choices=["test", "telegram-chat-id"])
 
+    from .fundamentals import add_parser as add_screen_parser
     from .research.report import add_parser as add_research_parser
+    from .universe import add_parser as add_universe_parser
 
     add_research_parser(sub)
+    add_universe_parser(sub)
+    add_screen_parser(sub)
 
     sp = sub.add_parser("schedule", help="run `tradebot daily` automatically every day (macOS)")
     sp.add_argument("action", choices=["install", "status", "run-now", "uninstall"])
@@ -458,7 +492,8 @@ def main(argv: List[str] = None) -> int:
     settings: Dict[str, Any] = load_settings(args.config)
     handler = {"strategies": cmd_strategies, "scan": cmd_scan, "backtest": cmd_backtest,
                "paper": cmd_paper, "dashboard": cmd_dashboard, "daily": cmd_daily,
-               "alerts": cmd_alerts, "schedule": cmd_schedule, "research": _cmd_research}[args.command]
+               "alerts": cmd_alerts, "schedule": cmd_schedule, "research": _cmd_research,
+               "universe": _cmd_universe, "screen": _cmd_screen}[args.command]
     return handler(args, settings)
 
 

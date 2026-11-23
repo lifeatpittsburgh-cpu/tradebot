@@ -34,7 +34,9 @@ def setup(tmp_path, monkeypatch):
                               state_path=str(tmp_path / "alerted.json"),
                               last_run_path=str(tmp_path / "last_run.json"))
     # BUY on bar N-1 for every symbol
-    monkeypatch.setattr(daily, "strategy_from", lambda s, *a, **k: Scripted(buys=(N - 1,)))
+    import tradebot.services as services
+
+    monkeypatch.setattr(services, "strategy_from", lambda s, *a, **k: Scripted(buys=(N - 1,)))
     full = make_ohlcv(100 + np.arange(N + 1, dtype=float))
     return settings, full
 

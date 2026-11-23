@@ -27,17 +27,33 @@ def provider_from(settings: Dict[str, Any]) -> DataProvider:
 def broker_from(settings: Dict[str, Any], risk: Optional[RiskConfig] = None) -> PaperBroker:
     p = settings["paper"]
     return PaperBroker(resolve_path(p["ledger_path"]), p["starting_capital"], settings["costs"],
-                       risk or RiskConfig.from_settings(settings))
+                       risk or RiskConfig.from_settings(settings), settings.get("sectors") or {})
+
+
+def strategy_name_for(settings: Dict[str, Any], market: Optional[str] = None) -> str:
+    """The configured strategy for `market` (strategy.by_market), else the default strategy.name."""
+    cfg = settings["strategy"]
+    return (cfg.get("by_market") or {}).get(market) or cfg["name"]
 
 
 def strategy_from(settings: Dict[str, Any], name: Optional[str] = None,
-                  params: Optional[Dict[str, Any]] = None) -> Strategy:
-    """The configured strategy, or `name` with its defaults. `params` override either."""
+                  params: Optional[Dict[str, Any]] = None, market: Optional[str] = None) -> Strategy:
+    """`name` with its defaults, or the strategy configured for `market` (or the default one).
+    `strategy.params` apply to the default strategy only; `params` override either."""
     cfg = settings["strategy"]
-    name = name or cfg["name"]
+    name = name or strategy_name_for(settings, market)
     merged = dict(cfg.get("params") or {}) if name == cfg["name"] else {}
     merged.update(params or {})
     return get_strategy(name, **merged)
+
+
+def strategies_label(settings: Dict[str, Any], markets: Optional[List[str]] = None) -> str:
+    """e.g. "us: sma_crossover, crypto: macd_trend" (or one name when every market uses the same)."""
+    markets = markets or active_markets(settings)
+    names = {m: strategy_name_for(settings, m) for m in markets}
+    if len(set(names.values())) == 1:
+        return next(iter(names.values()))
+    return ", ".join(f"{m}: {n}" for m, n in names.items())
 
 
 def symbols_for(settings: Dict[str, Any], market: str = "all") -> List[str]:
@@ -49,28 +65,40 @@ def run_paper_update(
     settings: Dict[str, Any],
     broker: PaperBroker,
     symbols: List[str],
-    strategy: Strategy,
+    strategy: Optional[Strategy] = None,
     provider: Optional[DataProvider] = None,
 ) -> Tuple[List[Signal], Dict[str, str]]:
     """One end-of-day paper-trading pass: fill yesterday's orders, check stops/targets,
-    queue orders from today's signals, save the ledger."""
+    queue orders from today's signals, save the ledger. Without `strategy`, each symbol uses
+    the strategy configured for its market."""
+    by_market: Dict[str, Strategy] = {}
+
+    def strat_for(symbol: str) -> Strategy:
+        if strategy is not None:
+            return strategy
+        m = market_of(symbol)
+        if m not in by_market:
+            by_market[m] = strategy_from(settings, market=m)
+        return by_market[m]
+
     provider = provider or provider_from(settings)
     start = date.today() - timedelta(days=settings["data"]["lookback_days"])
     signals: List[Signal] = []
     errors: Dict[str, str] = {}
     for symbol in symbols:
         try:
+            strat = strat_for(symbol)
             df = provider.get_history(symbol, start)
-            if len(df) < strategy.warmup + 2:
+            if len(df) < strat.warmup + 2:
                 errors[symbol] = f"only {len(df)} bars"
                 continue
             broker.sync(symbol, df)
-            sig = signal_for_latest_bar(symbol, df, strategy, broker.risk, broker.equity(market_of(symbol)))
+            sig = signal_for_latest_bar(symbol, df, strat, broker.risk, broker.equity(market_of(symbol)))
             signals.append(sig)
             if sig.action == "BUY":
-                broker.queue(symbol, "buy", sig.date, sig.extra["atr"], strategy.name, sig.reason)
+                broker.queue(symbol, "buy", sig.date, sig.extra["atr"], strat.name, sig.reason)
             elif sig.action == "SELL":
-                broker.queue(symbol, "sell", sig.date, strategy=strategy.name, reason=sig.reason)
+                broker.queue(symbol, "sell", sig.date, strategy=strat.name, reason=sig.reason)
         except Exception as exc:  # one bad ticker shouldn't stop the run
             errors[symbol] = f"{type(exc).__name__}: {exc}"
     broker.save()

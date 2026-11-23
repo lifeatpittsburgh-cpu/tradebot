@@ -98,15 +98,21 @@ tradingbot/
 - [x] Intraday charts (1m / 5m / 15m / 1h) for viewing, with pan and time-only zoom that re-fits prices
 - [x] Intraday backtest (5m / 1h): loses to daily after costs, so signals stay on daily candles
 
-### Phase 4 — Strategy quality (in progress)
+### Phase 4 — Strategy quality (done)
 - [x] Walk-forward testing: tune on 3 years, test on the next 6 months, repeat; `tradebot research`
 - [x] Entry filters tested out of sample: market regime (index above 200-day average, optional
       sell-all), relative strength (top half of the watchlist by 6-month return), volume
 - [x] Position-size test (risk per trade, cap per position)
-- [x] Live strategy switched to `macd_trend` (2026-11-22); position size unchanged (1% risk, 20% cap)
-- [ ] Wider, survivorship-free universe (e.g. S&P 500 members as of each date)
-- [ ] Sector exposure limits
-- [ ] Fundamentals screen for the long-term watchlist
+- [x] Live strategy switched to `macd_trend` (2026-11-22), then US changed to `sma_crossover` after the
+      S&P 500 test (2026-11-23); position size unchanged (1% risk, 20% cap)
+- [x] Survivorship-free universe: S&P 500 members as of each quarter since 2013, rebuilt from
+      Wikipedia's page history (`tradebot universe update`); `tradebot research --universe sp500`
+- [x] When BUYs compete for slots: optional priority (e.g. strongest 6-month return first)
+- [x] Sector exposure limits: `risk.max_per_sector` + `sectors:` in settings (backtests and paper; off by default)
+- [x] Fundamentals screen: `tradebot screen` ranks S&P 500 stocks on quality, growth, value and
+      safety within their sector (current Yahoo figures; not backtestable)
+- [x] Strategy per market (`strategy.by_market`): live US uses sma_crossover (best on the S&P 500
+      test), crypto keeps macd_trend (best on the crypto watchlist; no fair crypto test exists)
 
 ### Phase 5 — Broker integration (optional, needs explicit opt-in)
 - [ ] Alpaca (US) paper API, Zerodha Kite / Upstox (India) read-only
@@ -198,6 +204,36 @@ period: US 2018-09-14 to 2026-11-20, crypto 2018-06-11 to 2026-11-22.
 - Caveats: one 8-year period with a strong bull market; 9 symbols per market picked today
   (survivorship bias: the equal-weight buy & hold of these symbols made +443% US, +1,532% crypto);
   position sizes were compared on the same period they're reported on.
+
+**2026-11-23, survivorship-free test: point-in-time S&P 500, 2014-01-02 to 2026-11-20**
+
+A stock may be bought only while it was in the index (quarterly snapshots). 621 of the 829 stocks
+ever listed have Yahoo prices (71% of members in 2013, 99% today; the missing ones are mostly
+acquired or failed companies). Default settings, 1% risk, 8 positions, US costs, $100k. With ~500
+stocks there are usually more BUYs than slots, so each run is repeated with 10 random slot orders:
+
+| Strategy | Per year (range over 10 runs) | Worst drop | Sharpe |
+|---|---|---|---|
+| SPY buy & hold | +12.4% | -34% | 0.76 |
+| Equal-weight index members | +12.7% | -40% | 0.71 |
+| sma_crossover | **+8.3%** (+4.7 to +10.7) | -23% | **0.64** ± 0.13 |
+| sma_crossover, max 2 per sector | +9.3% (+6.9 to +11.4) | -20% (worst -22%) | 0.72 ± 0.08 |
+| composite | +5.9% (+2.4 to +8.9) | -33% | 0.46 ± 0.14 |
+| composite, max 2 per sector | +5.3% (+2.5 to +8.3) | -30% | 0.43 ± 0.11 |
+| macd_trend | +3.4% (+1.1 to +5.3) | -34% | 0.30 ± 0.08 |
+| macd_trend, max 2 per sector | +2.9% (-0.1 to +6.4) | -35% | 0.27 ± 0.12 |
+| rsi_reversion (3 runs) | -0.7% | -32% | 0.01 |
+
+- **No strategy beats SPY** on a fair universe. SMA crossover comes closest on risk (Sharpe
+  0.64-0.72 vs 0.76) with a much smaller worst drop (-20 to -23% vs -34%).
+- **MACD trend's lead was survivorship bias.** It was best on the 9 hand-picked stocks but is the
+  weakest trend strategy here; its ranges don't overlap SMA crossover's averages.
+- **Slot luck is large** (±2-3%/yr between random slot orders). "Strongest 6-month return first"
+  wasn't better than random (MACD +3.7%, SMA +7.0%, composite +4.7%/yr).
+- **Sector cap:** helps SMA crossover (higher Sharpe, worst drop -22% vs -32% across runs),
+  neutral to slightly worse for MACD and composite: an option, not a default.
+- **Regime filter and 20 smaller positions** didn't help on this universe either.
+- Crypto can't be tested this way: there's no free history of which coins were in a top-N list.
 
 ## Known limits
 - yfinance is unofficial and rate-limited; good for prototyping, not production. Swap

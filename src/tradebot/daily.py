@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from .alerts import Alert
 from .config import CURRENCY, active_markets, resolve_path
 from .data.base import DataProvider
-from .services import accounts_frame, broker_from, run_paper_update, strategy_from, symbols_for
+from .services import accounts_frame, broker_from, run_paper_update, strategies_label, symbols_for
 from .signals import Signal
 
 
@@ -89,12 +89,11 @@ def new_actionable(signals: List[Signal], alerted: Dict[str, str]) -> List[Signa
 def run_daily(settings: Dict[str, Any], provider: Optional[DataProvider] = None) -> DailyReport:
     paths = state_paths(settings)
     report = DailyReport(started=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    strategy = strategy_from(settings)
     broker = broker_from(settings)
     symbols = symbols_for(settings, "all")
-    report.strategy, report.symbols = strategy.name, len(symbols)
+    report.strategy, report.symbols = strategies_label(settings), len(symbols)
 
-    signals, report.errors = run_paper_update(settings, broker, symbols, strategy, provider)
+    signals, report.errors = run_paper_update(settings, broker, symbols, None, provider)
     report.events = list(broker.events)
 
     alerted = _load_json(paths["alerted"])
