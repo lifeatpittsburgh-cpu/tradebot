@@ -193,9 +193,12 @@ def test_live_needs_its_own_keys(monkeypatch):
 
 
 def test_config_and_daily_step_disabled_by_default():
+    import copy
+
+    from tradebot.config import DEFAULTS
     from tradebot.daily import broker_step
 
-    settings = load_settings()
+    settings = copy.deepcopy(DEFAULTS)  # built-in defaults, not your settings.yaml (where you may enable it)
     assert BrokerConfig.from_settings(settings).enabled is False and broker_step(settings) == []
     settings["broker"]["mode"] = "real"
     with pytest.raises(ValueError):

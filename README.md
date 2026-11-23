@@ -180,7 +180,7 @@ tradebot schedule uninstall
 ```
 
 20:15 New York time is after both the US close and the crypto daily close (00:00 UTC), all year,
-whatever timezone the Mac is set to. The job checks every 15 minutes and does the real work once
+whatever timezone the Mac is set to. The job checks every 5 minutes and does the real work once
 per evening, so a run missed while the Mac was asleep or off happens soon after it wakes, and a
 failed run (e.g. no internet) is retried, with one failure alert. The output goes to
 `state/logs/daily.log`, and the Paper portfolio tab shows the last run.
@@ -203,6 +203,35 @@ failed run (e.g. no internet) is retried, with one failure alert. The output goe
 3. Open your new bot in Telegram and send it any message.
 4. Run `tradebot alerts telegram-chat-id` and copy the `TELEGRAM_CHAT_ID=...` line into `.env`.
 5. Set `alerts.telegram: true` in `config/settings.yaml`, then run `tradebot alerts test`.
+
+## Chart alerts (intraday, Telegram)
+
+The daily job only alerts on **daily** candles. To get a message for the BUY/SELL markers on an
+intraday chart (e.g. SOL on 2-hour bars), add a chart alert:
+
+* **Dashboard:** on the Chart tab, pick the symbol, a 15m/30m/1h/2h/4h interval and the strategy
+  (sidebar), then switch on **🔔 Telegram alerts** above the chart. The **Chart alerts** tab lists,
+  adds and removes them.
+* **Command line:**
+
+```bash
+tradebot watch add SOL/USDT --interval 2h --strategy macd_trend
+tradebot watch list
+tradebot watch check            # check now (normally the scheduled job does this)
+tradebot watch remove SOL-USD --interval 2h
+```
+
+The scheduled job (`tradebot schedule install`) checks every 5 minutes. When a bar closes with a
+marker, one alert goes to every channel in `alerts:`. It covers only bars that close after you
+added the alert, and never the bar that is still forming, so a marker can't disappear after
+you've been told. Exchange-style pairs (`SOL/USDT`, `SOLUSDT`) map to Yahoo's `SOL-USD`; USDT
+trades within about 0.1% of USD. Yahoo has no 2h/4h bars, so they are built from 1h bars:
+crypto bars are aligned to 00:00 UTC, stock bars to the 9:30 open. The chart's *Period* only
+changes what's displayed: signals always use the full history the indicators need.
+
+These are prompts to look at a chart, not tested trades. The strategies were tested on daily
+candles, and the 5m/1h backtest lost to daily after costs. Chart alerts never touch the paper
+account or Alpaca. The list lives in `state/watchlist.json`.
 
 ## Tests
 

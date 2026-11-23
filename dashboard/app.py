@@ -32,6 +32,7 @@ from tradebot.services import (DISCLAIMER, accounts_frame, broker_from, history_
                                strategy_from, strategy_name_for, symbols_for)
 from tradebot.daily import load_last_run  # noqa: E402
 from tradebot.strategies import REGISTRY  # noqa: E402
+from tradebot import watch as chart_alerts  # noqa: E402
 
 LOCAL_TZ = datetime.now().astimezone().tzinfo
 
@@ -58,8 +59,11 @@ def load_history(symbol: str, start_iso: str, nonce: int) -> pd.DataFrame:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_intraday(symbol: str, interval: str, days: int, nonce: int) -> pd.DataFrame:
-    """Minute/hour bars for the chart. Cached for a minute only; the last bar may still be forming."""
-    return YFinanceProvider().get_intraday(symbol, interval, days)
+    """Minute/hour bars for the chart. Cached for a minute only; the last bar may still be forming.
+    2h and 4h bars are built from hourly bars, the same way the chart alerts build them."""
+    src = CHART_SOURCE.get(interval, interval)
+    df = YFinanceProvider().get_intraday(symbol, src, days)
+    return chart_alerts.resample_bars(df, interval, market_of(symbol)) if src != interval else df
 
 
 def no_data_message(symbol: str) -> str:
@@ -123,7 +127,8 @@ with st.sidebar:
     st.divider()
     st.caption(f"Daily candles from Yahoo Finance. Today's unfinished candle is ignored. {DISCLAIMER}")
 
-tab_signals, tab_chart, tab_backtest, tab_paper = st.tabs(["🚦 Signals", "📊 Chart", "🧪 Backtest", "💼 Paper portfolio"])
+tab_signals, tab_chart, tab_alerts, tab_backtest, tab_paper = st.tabs(
+    ["🚦 Signals", "📊 Chart", "🔔 Chart alerts", "🧪 Backtest", "💼 Paper portfolio"])
 
 
 # ---- Signals ---------------------------------------------------------------------------------
@@ -167,18 +172,47 @@ CHART_PERIODS = {
     "1m": [("1D", 1), ("2D", 2), ("5D", 5), ("7D", 7)],
     "5m": [("1D", 1), ("5D", 5), ("1M", 30), ("2M", 60)],
     "15m": [("5D", 5), ("1M", 30), ("2M", 60)],
+    "30m": [("5D", 5), ("1M", 30), ("2M", 60)],
     "1h": [("1M", 30), ("3M", 92), ("6M", 183), ("1Y", 365), ("2Y", 730)],
+    "2h": [("1D", 1), ("5D", 5), ("1M", 30), ("3M", 92), ("1Y", 365), ("2Y", 730)],
+    "4h": [("5D", 5), ("1M", 30), ("3M", 92), ("1Y", 365), ("2Y", 730)],
     "1D": [("3M", 92), ("6M", 183), ("1Y", 365), ("2Y", 730), ("5Y", 1826)],
 }
 INTRADAY_VIEW_BARS = 120  # intraday charts open on the latest 120 candles; drag left for the rest of the period
-DEFAULT_PERIOD = {"1m": "1D", "5m": "5D", "15m": "1M", "1h": "3M", "1D": "1Y"}
+DEFAULT_PERIOD = {"1m": "1D", "5m": "5D", "15m": "1M", "30m": "1M", "1h": "3M", "2h": "3M", "4h": "1Y", "1D": "1Y"}
+CHART_SOURCE = {"2h": "1h", "4h": "1h"}  # Yahoo has no 2h/4h bars: built from 1h bars
+
+
+def alert_toggle(symbol: str, interval: str, strategy: str) -> None:
+    """On/off switch for Telegram alerts on exactly what this chart shows (symbol, bars, strategy)."""
+    if interval not in chart_alerts.WATCH_INTERVALS:
+        st.caption("🔔 Telegram alerts are available for 15m bars and longer.")
+        return
+    key = f"alert_{symbol}_{interval}_{strategy}"
+    on = chart_alerts.is_watched(settings, symbol, interval, strategy)
+    if st.session_state.get(key) != on:  # follow the saved list (e.g. after removing it in the Alerts tab)
+        st.session_state[key] = on
+
+    def flip() -> None:
+        if st.session_state[key]:
+            chart_alerts.add_watch(settings, symbol, interval, strategy)
+            st.toast(f"Alerts on for {symbol} {interval} ({strategy})", icon="🔔")
+        else:
+            chart_alerts.remove_watch(settings, symbol, interval, strategy)
+            st.toast(f"Alerts off for {symbol} {interval}", icon="🔕")
+
+    st.toggle(f"🔔 Telegram alerts: {symbol} · {interval} · {strategy}", key=key, on_change=flip,
+              help="Sends a message when a bar closes with a BUY or SELL marker for this symbol, bar size "
+                   "and strategy. It starts with the next bar that closes. Manage all alerts in the "
+                   "Chart alerts tab.")
 
 
 def _intraday_chart(symbol: str, interval: str, days: int, label: str) -> None:
     sym_market = market_of(symbol)
     # Load extra bars so the 200-bar average is valid from the first bar shown, within Yahoo's limit.
     with st.spinner(f"Loading {interval} bars for {symbol}..."):
-        df = load_intraday(symbol, interval, INTRADAY_MAX_DAYS[interval], st.session_state.nonce)
+        df = load_intraday(symbol, interval, INTRADAY_MAX_DAYS[CHART_SOURCE.get(interval, interval)],
+                           st.session_state.nonce)
     if df.empty:
         st.error(no_data_message(symbol))
         return
@@ -197,9 +231,12 @@ def _intraday_chart(symbol: str, interval: str, days: int, label: str) -> None:
     k3.metric("Low", f"{fmt_price(shown['low'].min())}", border=True, help=f"Lowest price over {label}")
     k4.metric(f"RSI ({interval})", f"{ind.rsi(df['close']).iloc[-1]:.0f}", border=True,
               help="RSI (14) on these bars: <30 oversold, >70 overbought")
-    show_sigs = st.toggle("Show strategy signals on these bars", value=False,
+    t1, t2 = st.columns([3, 4])
+    show_sigs = t1.toggle("Show strategy signals on these bars", value=False,
                           help="The strategies are built and tested for daily candles. On minute bars their "
                                "signals are for reference only; paper trading and the Signals tab use daily candles.")
+    with t2:
+        alert_toggle(symbol, interval, strategy_name)
     sigs = strategy_from(settings, strategy_name).generate(df) if show_sigs else pd.DataFrame(
         {"signal": 0, "reason": ""}, index=df.index)
     st.caption(f"{interval} candles, {tz} time. Indicators are computed on {interval} bars "
@@ -213,13 +250,17 @@ with tab_chart:
     watch = symbols_for(settings, market)
     c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
     pick = c1.selectbox("Symbol", watch, key="chart_symbol") if watch else None
-    custom = c2.text_input("…or any ticker", placeholder="e.g. TSLA or DOGE-USD").strip().upper()
+    raw = c2.text_input("…or any ticker", placeholder="e.g. TSLA, DOGE-USD or SOL/USDT")
+    custom = chart_alerts.normalize_symbol(raw)
     interval = c3.segmented_control("Interval", list(CHART_PERIODS), default="1D", key="chart_interval") or "1D"
     options = CHART_PERIODS[interval]
     span = c4.segmented_control("Period", [lbl for lbl, _ in options], default=DEFAULT_PERIOD[interval],
                                 key=f"chart_span_{interval}") or DEFAULT_PERIOD[interval]
     days = dict(options)[span]
     symbol = custom or pick
+    if raw.strip() and custom != raw.strip().upper():
+        st.caption(f"Showing Yahoo Finance's **{custom}** for {raw.strip()}. Yahoo has USD pairs only; "
+                   "USDT trades within about 0.1% of USD, so candles and signals are effectively the same.")
     if symbol and interval != "1D":
         _intraday_chart(symbol, interval, days, span)
     elif symbol:
@@ -262,6 +303,75 @@ with tab_chart:
             fig = price_chart(df, strategy.generate(df), sym_market,
                               display_from=df.index[-1] - pd.Timedelta(days=days), levels=levels)
             show_price_chart(fig)
+
+
+
+# ---- Chart alerts ----------------------------------------------------------------------------
+def _ago_text(iso: str) -> str:
+    if not iso:
+        return ""
+    mins = int((pd.Timestamp.now(tz="UTC") - pd.Timestamp(iso)).total_seconds() // 60)
+    return f"{mins} min ago" if mins < 120 else f"{mins // 60} h ago"
+
+
+with tab_alerts:
+    st.subheader("Chart alerts")
+    st.caption("Get a Telegram message when a bar closes with a BUY or SELL marker, the same markers the Chart tab "
+               "shows with *Show strategy signals*. Pick the symbol, bar size and strategy. Alerts start with the "
+               "next bar that closes, and each signal is sent once. Signals only: nothing is bought or sold.")
+    from tradebot import schedule as sched  # noqa: E402
+
+    a_cfg = settings.get("alerts", {})
+    sinfo = sched.status() if sys.platform == "darwin" else {"installed": False}
+    if not a_cfg.get("telegram"):
+        st.warning("Telegram is off (`alerts.telegram` in config/settings.yaml), so alerts only reach this "
+                   "computer's notifications and the log.", icon="📵")
+    if not sinfo.get("installed"):
+        st.warning("The scheduled job isn't installed, so nothing checks for new bars. In a terminal run "
+                   "`tradebot schedule install`.", icon="⏰")
+    elif sinfo.get("check_every") != sched.CHECK_EVERY_SECONDS:
+        st.warning(f"The scheduled job checks every {int(sinfo.get('check_every') or 900) // 60} minutes. Run "
+                   f"`tradebot schedule install` once to check every {sched.CHECK_EVERY_SECONDS // 60} minutes.",
+                   icon="⏰")
+    else:
+        st.info(f"Checked every {sched.CHECK_EVERY_SECONDS // 60} minutes while this computer is awake, so a "
+                "message arrives within about 5 minutes of the bar closing.", icon="⏱️")
+
+    with st.form("add_alert", clear_on_submit=True, border=True):
+        f1, f2, f3, f4 = st.columns([3, 2, 3, 2], vertical_alignment="bottom")
+        new_sym = f1.text_input("Symbol", placeholder="SOL/USDT, BTC-USD, AAPL")
+        new_int = f2.selectbox("Bars", list(chart_alerts.WATCH_INTERVALS), index=3)
+        new_strat = f3.selectbox("Strategy", ["(market default)"] + names)
+        if f4.form_submit_button("Add alert", type="primary", width="stretch") and new_sym.strip():
+            sym = chart_alerts.normalize_symbol(new_sym)
+            strat = strategy_name_for(settings, market_of(sym)) if new_strat == "(market default)" else new_strat
+            if load_intraday(sym, "1h", 5, st.session_state.nonce).empty:
+                st.error(no_data_message(sym))
+            else:
+                chart_alerts.add_watch(settings, sym, new_int, strat)
+                st.toast(f"Alerts on for {sym} {new_int} ({strat})", icon="🔔")
+
+    items = chart_alerts.load_watchlist(settings)
+    wstate = chart_alerts.load_watch_state(settings)
+    if not items:
+        st.caption("No alerts yet. Add one above, or switch on *Telegram alerts* above a chart in the Chart tab.")
+    for e in items:
+        stt = wstate.get(chart_alerts.entry_key(e), {})
+        r1, r2, r3, r4 = st.columns([3, 4, 4, 1], vertical_alignment="center")
+        r1.markdown(f"**{e['symbol']}** · {e['interval']} · `{e['strategy']}`")
+        if stt.get("error"):
+            r2.markdown(f":red[Error: {stt['error']}]")
+        elif stt.get("last_bar"):
+            r2.caption(f"Checked {_ago_text(stt.get('checked_utc', ''))}; latest closed bar {stt['last_bar']}")
+        else:
+            r2.caption(f"Added {_ago_text(e['added'])}; waiting for the first bar to close")
+        r3.caption(f"Last alert: {stt['last_signal']}" if stt.get("last_signal") else "No alert sent yet")
+        if r4.button("✕", key=f"rm_{chart_alerts.entry_key(e)}", help="Stop these alerts"):
+            chart_alerts.remove_watch(settings, e["symbol"], e["interval"], e["strategy"])
+            st.rerun()
+    st.caption("Strategies are tested on daily candles. On intraday bars they trade more often and costs matter "
+               "more (the 5m and 1h backtest lost to daily after costs), so treat these as prompts to look at "
+               "the chart, not as tested trades.")
 
 
 # ---- Backtest --------------------------------------------------------------------------------

@@ -30,6 +30,7 @@ def setup(tmp_path, monkeypatch):
     settings["active_markets"] = ["us"]
     settings["watchlists"]["us"] = ["AAA", "BBB"]
     settings["paper"]["ledger_path"] = str(tmp_path / "ledger.json")
+    settings["broker"]["enabled"] = False  # never reach Alpaca from a test, whatever settings.yaml says
     settings["alerts"].update(console=True, macos=False, telegram=False,
                               state_path=str(tmp_path / "alerted.json"),
                               last_run_path=str(tmp_path / "last_run.json"))
@@ -106,7 +107,7 @@ def test_schedule_time_and_plist():
         with pytest.raises(ValueError):
             parse_time(bad)
     plist = build_plist("20:15", "America/New_York")
-    assert plist["StartInterval"] == 900 and "StartCalendarInterval" not in plist
+    assert plist["StartInterval"] == 300 and "StartCalendarInterval" not in plist
     assert plist["ProgramArguments"][-6:] == ["daily", "--if-due", "--at", "20:15", "--tz", "America/New_York"]
 
 

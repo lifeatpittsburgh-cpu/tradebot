@@ -5,14 +5,14 @@
     tradebot schedule run-now                  run the job immediately (to test it)
     tradebot schedule uninstall                remove it
 
-How it works: launchd starts `tradebot daily --if-due` every 15 minutes. That command does
+How it works: launchd starts `tradebot daily --if-due` every 5 minutes. That command does
 nothing unless a daily slot (schedule.time in schedule.timezone, default 20:15 New York time)
 has passed without a successful run, so the real work happens once per evening.
 
 Why not launchd's own calendar timer (StartCalendarInterval)? It computes times in the timezone
 macOS had when you logged in, so after a timezone change it fires at the wrong hour until you
 log out. It also can't express "20:15 New York time" on a Mac set to another timezone. The
-15-minute check avoids both, catches up after sleep or shutdown, and follows daylight saving.
+5-minute check avoids both, catches up after sleep or shutdown, and follows daylight saving. The same check also sends chart alerts (`tradebot watch`).
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from .config import PROJECT_ROOT
 LABEL = "com.tradebot.daily"
 LOG_PATH = PROJECT_ROOT / "state" / "logs" / "daily.log"
 STATE_PATH = PROJECT_ROOT / "state" / "schedule_state.json"
-CHECK_EVERY_SECONDS = 15 * 60
+CHECK_EVERY_SECONDS = 5 * 60
 DEFAULT_TIME, DEFAULT_TZ = "20:15", "America/New_York"
 
 
@@ -177,6 +177,7 @@ def status() -> Dict[str, Any]:
             job = plistlib.load(fh)
         args = job.get("ProgramArguments", [])
         info["old_style"] = "StartCalendarInterval" in job  # pre-fix job: reinstall it
+        info["check_every"] = job.get("StartInterval")
         for flag, key in (("--at", "time"), ("--tz", "timezone")):
             if flag in args and args.index(flag) + 1 < len(args):
                 info[key] = args[args.index(flag) + 1]
