@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 import warnings
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +30,10 @@ from tradebot.scanner import signal_for_latest_bar  # noqa: E402
 from tradebot.services import (DISCLAIMER, accounts_frame, broker_from, history_frame,  # noqa: E402
                                pending_frame, positions_frame, run_paper_update, signals_frame,
                                strategy_from, symbols_for)
+from tradebot.daily import load_last_run  # noqa: E402
 from tradebot.strategies import REGISTRY  # noqa: E402
+
+LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 st.set_page_config(page_title="TradeBot", page_icon="📈", layout="wide")
 
@@ -402,6 +405,24 @@ with tab_paper:
     st.caption("A simulated account: no real orders. Each update fills yesterday's queued orders at the open, "
                "checks stops and targets, then queues orders from the latest signals. Run it once a day "
                "after the close (US 4pm ET; crypto candles close 00:00 UTC).")
+
+    last = load_last_run(settings)
+    if not last:
+        st.warning("No automatic daily run yet. Set one up in a terminal with `tradebot schedule install`, "
+                   "or press the button below once a day.", icon="⏰")
+    else:
+        when = pd.Timestamp(last.get("finished") or last["started"]).tz_convert(None)
+        age_h = (pd.Timestamp.utcnow().tz_localize(None) - when).total_seconds() / 3600
+        msg = (f"Last daily run: {when.tz_localize('UTC').tz_convert(LOCAL_TZ):%a %d %b, %H:%M} "
+               f"({age_h:.0f} h ago), {len(last.get('new_signals', []))} new signal(s), "
+               f"{len(last.get('events', []))} paper update(s)")
+        if not last.get("ok"):
+            st.error(msg + ". It FAILED: check state/logs/daily.log.", icon="⚠️")
+        elif age_h > 30:
+            st.warning(msg + ". That's over a day old: is the schedule installed (`tradebot schedule status`)?",
+                       icon="⏰")
+        else:
+            st.success(msg + ".", icon="✅")
 
     acc = accounts_frame(broker, active_markets(settings))
     cols = st.columns(max(len(acc), 1))
