@@ -15,7 +15,7 @@ See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the architecture and roadma
 **1. One-time setup** (from a terminal):
 
 ```bash
-cd ~/Documents/Projects/Personal/TradeBot/tradingbot
+cd ~/Projects/tradingbot
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev,dashboard]"
@@ -24,7 +24,7 @@ pip install -e ".[dev,dashboard]"
 **2. Start the dashboard:**
 
 ```bash
-cd ~/Documents/Projects/Personal/TradeBot/tradingbot
+cd ~/Projects/tradingbot
 source .venv/bin/activate
 tradebot dashboard
 ```
@@ -41,7 +41,7 @@ they're cached for an hour (use **Refresh market data** in the sidebar to force 
 | Signals | Today's BUY / SELL / HOLD for every symbol in the watchlist, with stop, target and size |
 | Chart | Candles, SMA 20/50/200, Bollinger bands, BUY/SELL markers, volume, RSI, MACD; type any ticker |
 | Backtest | Replay a strategy on 1-10 years of history as a portfolio; tune risk with sliders; "Compare all strategies" ranks them; download trades |
-| Paper portfolio | Simulated account. Click **Run paper update** once a day after the close to fill orders, apply stops/targets and queue new signals |
+| Paper portfolio | Simulated account, updated by the daily job (or click **Run paper update**): fills orders, applies stops/targets, queues new signals. Shows when the last daily run happened |
 
 Use the sidebar to switch between **US stocks** and **Crypto** and to pick the strategy.
 
@@ -63,6 +63,9 @@ tradebot paper run                           # update the paper accounts with to
 tradebot paper status
 tradebot paper reset
 tradebot dashboard                           # web dashboard on http://localhost:8501
+tradebot daily                               # end-of-day job: paper update + alerts on new signals
+tradebot alerts test                         # send a test alert to every enabled channel
+tradebot schedule install|status|run-now|uninstall   # run `tradebot daily` automatically
 ```
 
 **When to run:** US daily candles are final after 4:00pm ET; crypto candles close at
@@ -86,11 +89,46 @@ Every position also has an ATR-based **stop-loss** (2×ATR below entry) and a
 capped at 20% of the account, with at most 8 open positions per account.
 Indexes such as `^NSEI` are scanned for reference but never traded. All of this is set in `config/settings.yaml`.
 
-## Telegram alerts
+## Daily auto-run and alerts
 
-1. Create a bot with @BotFather and get your chat id.
-2. `cp .env.example .env` and fill in `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
-3. Set `alerts.telegram: true` in `config/settings.yaml`.
+`tradebot daily` is the end-of-day job. It updates the paper account (fills queued orders,
+applies stops and targets, queues orders from new signals) and sends an alert listing **new**
+BUY/SELL signals and paper-account changes. Each signal is alerted once: running it again the
+same evening, on a weekend or on a market holiday sends nothing for candles already covered.
+
+**Run it automatically every day (macOS):**
+
+```bash
+tradebot schedule install          # once a day after 20:15 New York time (schedule: in settings.yaml)
+tradebot schedule status           # installed? next run, last run and its result
+tradebot schedule run-now          # run the full job now to test it
+tradebot schedule uninstall
+```
+
+20:15 New York time is after both the US close and the crypto daily close (00:00 UTC), all year,
+whatever timezone the Mac is set to. The job checks every 15 minutes and does the real work once
+per evening, so a run missed while the Mac was asleep or off happens soon after it wakes, and a
+failed run (e.g. no internet) is retried, with one failure alert. The output goes to
+`state/logs/daily.log`, and the Paper portfolio tab shows the last run.
+
+> The project must not live in `~/Documents`, `~/Desktop` or `~/Downloads`: macOS blocks
+> background jobs from reading those folders, so the scheduled run would fail.
+
+**Alert channels** (`alerts:` in `config/settings.yaml`):
+
+| Channel | Setup |
+|---|---|
+| `console` | none: printed to the terminal and the log |
+| `macos` | none: a notification banner on this Mac |
+| `telegram` | see below |
+
+**Telegram setup:**
+
+1. In Telegram, message **@BotFather**, send `/newbot` and follow the prompts. It replies with a token.
+2. `cp .env.example .env` and set `TELEGRAM_BOT_TOKEN=` to that token. `.env` is git-ignored; never commit it.
+3. Open your new bot in Telegram and send it any message.
+4. Run `tradebot alerts telegram-chat-id` and copy the `TELEGRAM_CHAT_ID=...` line into `.env`.
+5. Set `alerts.telegram: true` in `config/settings.yaml`, then run `tradebot alerts test`.
 
 ## Tests
 

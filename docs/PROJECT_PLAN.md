@@ -79,12 +79,15 @@ tradingbot/
 - [x] CLI: `scan`, `backtest` (one symbol, a list, or a watchlist), `backtest --compare`
 - [x] Unit tests
 
-### Phase 2 — Paper trading and alerts
+### Phase 2 — Paper trading and alerts (done)
 - [x] Paper broker with JSON ledger (open/close positions, P&L)
 - [x] `paper run` CLI: apply today's signals to the paper account (max positions, indexes not traded)
-- [ ] Telegram notifier (code stubbed; needs bot token in `.env`)
-- [ ] Scheduled end-of-day runs (cron / launchd) after US and IST closes
-- [ ] Market calendars and holidays (`pandas_market_calendars`)
+- [x] `tradebot daily`: paper update + alerts; each BUY/SELL alerted once per candle
+- [x] Alert channels: console/log, macOS notification, Telegram (+ `alerts telegram-chat-id`, `alerts test`)
+- [x] Telegram tested with a real bot (2026-11-22)
+- [x] Scheduled end-of-day run with launchd (`tradebot schedule install`, default 20:15 ET)
+- [x] Holidays without a calendar library: no new candle on a holiday means no new alert
+- [x] Dashboard shows the last daily run and warns when it failed or is over a day old
 
 ### Phase 3 — Dashboard and crypto (done)
 - [x] Crypto market: fractional quantities, 24/7 calendar, exchange fees, BTC benchmark
@@ -92,6 +95,8 @@ tradingbot/
 - [x] Streamlit: watchlist signals table, price chart with indicators and signal markers
 - [x] Backtest explorer with parameter sliders, strategy comparison, equity and drawdown curves
 - [x] Paper portfolio view with one-click daily update
+- [x] Intraday charts (1m / 5m / 15m / 1h) for viewing, with pan and time-only zoom that re-fits prices
+- [x] Intraday backtest (5m / 1h): loses to daily after costs, so signals stay on daily candles
 
 ### Phase 4 — Strategy quality
 - [ ] Walk-forward / out-of-sample validation, parameter sweeps

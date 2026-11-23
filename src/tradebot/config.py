@@ -34,7 +34,9 @@ DEFAULTS: Dict[str, Any] = {
         "ledger_path": "state/paper_ledger.json",
         "starting_capital": {"us": 10000, "crypto": 10000, "india": 500000},
     },
-    "alerts": {"console": True, "telegram": False},
+    "alerts": {"console": True, "macos": True, "telegram": False,
+               "state_path": "state/alert_state.json", "last_run_path": "state/last_run.json"},
+    "schedule": {"time": "20:15", "timezone": "America/New_York"},
 }
 
 MARKETS = ("us", "crypto", "india")

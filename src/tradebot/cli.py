@@ -247,6 +247,124 @@ def _print_status(broker: PaperBroker) -> None:
               + ", ".join(f"{m} {v:+,.2f}" for m, v in h.groupby("market")["pnl"].sum().items()))
 
 
+def cmd_daily(args, settings) -> int:
+    from datetime import datetime, timezone
+
+    from .alerts import send
+    from .daily import run_daily, save_last_run
+
+    sched_state, slot = None, None
+    if args.if_due:  # called every 15 minutes by the scheduled job: only run once per daily slot
+        from . import schedule
+
+        default_time, default_tz = schedule.schedule_config(settings)
+        sched_state = schedule.load_state()
+        due, slot = schedule.is_due(datetime.now(timezone.utc), args.at or default_time,
+                                    args.tz or default_tz, sched_state)
+        forced = sched_state.pop("force_next", False)
+        if not (due or forced):
+            return 0
+
+    print(f"=== TradeBot daily run {datetime.now().astimezone():%Y-%m-%d %H:%M %Z}"
+          + (f" (scheduled for {slot:%Y-%m-%d %H:%M %Z})" if slot else "") + " ===")
+    report = run_daily(settings)
+    print(f"Strategy {report.strategy}, {report.symbols} symbols, {len(report.new_signals)} new signal(s)"
+          + (f", {report.repeated_signals} already alerted" if report.repeated_signals else ""))
+    for sym, err in report.errors.items():
+        print(f"!! {sym}: {err}", file=sys.stderr)
+    alert = report.alert()
+    # A failing scheduled run retries every 15 minutes; send its failure alert only once per slot.
+    repeat_failure = (sched_state is not None and not report.ok
+                      and sched_state.get("failure_alerted_slot") == (slot.isoformat() if slot else None))
+    if args.no_alerts or repeat_failure:
+        print(alert.text() if alert.lines else "Nothing new.")
+    else:
+        report.alert_failures = [f"{ch}: {err}" for ch, err in send(alert, settings)]
+    save_last_run(settings, report)
+    if sched_state is not None:
+        from . import schedule
+
+        if report.ok:
+            sched_state["last_success_slot"] = slot.isoformat()
+        else:
+            sched_state["failure_alerted_slot"] = slot.isoformat()
+        schedule.save_state(sched_state)
+    return 0 if report.ok else 1
+
+
+def cmd_alerts(args, settings) -> int:
+    from .alerts import Alert, channels_from, send
+
+    if args.action == "telegram-chat-id":
+        from .alerts.telegram import find_chat_ids
+
+        chats = find_chat_ids()
+        if not chats:
+            print("No messages found. Open your bot in Telegram, send it any message, then run this again.")
+            return 1
+        for c in chats:
+            print(f"{c['type']:<8} {c['name']:<30} TELEGRAM_CHAT_ID={c['id']}")
+        print("\nCopy the TELEGRAM_CHAT_ID line into .env, then set alerts.telegram: true in config/settings.yaml.")
+        return 0
+    try:
+        names = [type(c).__name__.replace("Notifier", "") for c in channels_from(settings)]
+        print("Enabled channels: " + ", ".join(names))
+    except Exception as exc:
+        print(f"!! {exc}", file=sys.stderr)
+    failures = send(Alert("TradeBot test alert", ["If you can read this, TradeBot alerts are working."],
+                          summary="Alerts are working."), settings)
+    return 1 if failures else 0
+
+
+def cmd_schedule(args, settings) -> int:
+    from datetime import datetime, timezone
+
+    from . import schedule
+
+    default_time, default_tz = schedule.schedule_config(settings)
+    if args.action == "install":
+        time_str, tz = args.time or default_time, args.timezone or default_tz
+        schedule.parse_time(time_str)
+        path = schedule.install(time_str, tz)
+        print(f"Installed: `tradebot daily` runs once a day after {time_str} {tz}.")
+        for note in schedule.timing_notes(time_str, tz):
+            print("  " + note)
+        print(f"Job file: {path}\nLog:      {schedule.LOG_PATH}")
+        print("It checks every 15 minutes, so a run missed while the Mac slept or was off happens soon after "
+              "it wakes. Remove it with `tradebot schedule uninstall`.")
+    elif args.action == "uninstall":
+        print("Removed the scheduled job." if schedule.uninstall() else "No scheduled job was installed.")
+    elif args.action == "run-now":
+        schedule.run_now()
+        print(f"Started. Follow it with:  tail -f {schedule.LOG_PATH}")
+    else:
+        from .daily import load_last_run
+
+        info = schedule.status()
+        if not info["installed"]:
+            print("Not installed. Run `tradebot schedule install`.")
+        elif info.get("old_style"):
+            print("Installed with the old timer, which can fire at the wrong hour. "
+                  "Run `tradebot schedule install` again to update it.")
+        else:
+            time_str, tz = info.get("time", default_time), info.get("timezone", default_tz)
+            now = datetime.now(timezone.utc)
+            due, _ = schedule.is_due(now, time_str, tz, schedule.load_state())
+            nxt = schedule.next_slot(now, time_str, tz).astimezone()
+            print(f"Installed: once a day after {time_str} {tz} ({'loaded' if info['loaded'] else 'NOT loaded'})")
+            print("  " + ("Due now: it will run at the next 15-minute check." if due
+                          else f"Next run: {nxt:%a %d %b %H:%M} on this Mac's clock."))
+            if "last exit code" in info:
+                print(f"  last check exit code: {info['last exit code']}")
+        last = load_last_run(settings)
+        if last:
+            when = datetime.fromisoformat(last.get("finished") or last["started"]).astimezone()
+            print(f"Last daily run: {when:%a %d %b %H:%M}, {'ok' if last.get('ok') else 'FAILED'}, "
+                  f"{len(last.get('new_signals', []))} new signal(s), {len(last.get('errors', {}))} error(s)")
+        print(f"Log: {schedule.LOG_PATH}")
+    return 0
+
+
 def cmd_dashboard(args, settings) -> int:
     import subprocess
     from pathlib import Path
@@ -308,6 +426,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("action", choices=["run", "status", "reset"])
     universe_opts(sp)
     strategy_opts(sp)
+
+    sp = sub.add_parser("daily", help="end-of-day job: update the paper account and alert on new signals")
+    sp.add_argument("--no-alerts", action="store_true", help="print the report instead of sending alerts")
+    sp.add_argument("--if-due", action="store_true", help=argparse.SUPPRESS)  # used by the scheduled job
+    sp.add_argument("--at", help=argparse.SUPPRESS)
+    sp.add_argument("--tz", help=argparse.SUPPRESS)
+
+    sp = sub.add_parser("alerts", help="test alert channels or set up Telegram")
+    sp.add_argument("action", choices=["test", "telegram-chat-id"])
+
+    sp = sub.add_parser("schedule", help="run `tradebot daily` automatically every day (macOS)")
+    sp.add_argument("action", choices=["install", "status", "run-now", "uninstall"])
+    sp.add_argument("--time", help="HH:MM, 24-hour (default: schedule.time in settings, 20:15)")
+    sp.add_argument("--timezone", help="timezone of --time (default: schedule.timezone, America/New_York)")
     return p
 
 
@@ -315,7 +447,8 @@ def main(argv: List[str] = None) -> int:
     args = build_parser().parse_args(argv)
     settings: Dict[str, Any] = load_settings(args.config)
     handler = {"strategies": cmd_strategies, "scan": cmd_scan, "backtest": cmd_backtest,
-               "paper": cmd_paper, "dashboard": cmd_dashboard}[args.command]
+               "paper": cmd_paper, "dashboard": cmd_dashboard, "daily": cmd_daily,
+               "alerts": cmd_alerts, "schedule": cmd_schedule}[args.command]
     return handler(args, settings)
 
 

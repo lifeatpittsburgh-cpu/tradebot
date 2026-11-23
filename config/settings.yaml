@@ -78,5 +78,14 @@ paper:
     india: 500000          # INR
 
 alerts:
-  console: true
-  telegram: false          # needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env
+  console: true            # print to the terminal / state/logs/daily.log
+  macos: true              # notification banner on this Mac
+  telegram: true          # needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env (see README)
+
+# `tradebot schedule install` runs `tradebot daily` once a day after this time, in this timezone
+# (whatever timezone the Mac is set to). It should be after 16:15 New York time (US candle final)
+# and after 00:00 UTC (crypto candle final); 20:15 New York time satisfies both all year.
+# Re-run `tradebot schedule install` after changing these.
+schedule:
+  time: "20:15"
+  timezone: America/New_York
