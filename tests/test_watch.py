@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 import tradebot.services as services
-from tradebot import watch
+from tradebot import timezones, watch
 from tradebot.config import load_settings
 from tradebot.strategies.base import Strategy
 
@@ -80,6 +80,7 @@ def setup(tmp_path, monkeypatch):
     settings = load_settings()
     settings["alerts"].update(console=True, macos=False, telegram=False,
                               watchlist_path=str(tmp_path / "wl.json"), watch_state_path=str(tmp_path / "ws.json"))
+    monkeypatch.setattr(timezones, "PREFS_PATH", str(tmp_path / "prefs.json"))  # not your saved choice
     strat = {"s": AtTimes()}
     monkeypatch.setattr(services, "strategy_from", lambda s, *a, **k: strat["s"])
     return settings, strat
@@ -158,3 +159,28 @@ def test_add_watch_validates_and_dedupes(setup):
     watch.add_watch(settings, "SOL-USD", "2h", "macd_trend")
     assert len(watch.load_watchlist(settings)) == 1
     assert watch.is_watched(settings, "solusdt", "2h", "macd_trend")
+
+
+def test_alert_times_follow_the_chosen_time_zone(setup):
+    settings, strat = setup
+    data = bars("2026-11-19 00:00", 30, "2h")
+    watch.add_watch(settings, "SOL-USD", "2h", "macd_trend", now=utc("2026-11-21 05:00"))
+    strat["s"] = AtTimes(buys=("2026-11-21 04:00",))
+    timezones.save_pref("America/New_York")
+    sig = watch.check(settings, lambda *a: data, utc("2026-11-21 06:01")).signals[0]
+    assert (sig.bar_start, sig.tz) == ("Fri 20 Nov 23:00", "New York")   # 04:00 UTC = 23:00 EST
+
+
+def test_time_zone_preference_and_conversion(tmp_path, monkeypatch):
+    monkeypatch.setattr(timezones, "PREFS_PATH", str(tmp_path / "prefs.json"))
+    assert timezones.load_pref() == timezones.EXCHANGE
+    with pytest.raises(ValueError):
+        timezones.save_pref("Mars/Olympus")
+    timezones.save_pref("Asia/Kolkata")
+    assert timezones.load_pref() == "Asia/Kolkata"
+    assert timezones.resolve(timezones.EXCHANGE, "crypto") == "UTC"
+    assert timezones.resolve(timezones.EXCHANGE, "us") == "America/New_York"
+    idx = pd.DatetimeIndex(["2026-11-20 09:30", "2026-07-20 09:30"])   # New York, winter and summer
+    out = timezones.convert_index(idx, "us", "UTC")
+    assert list(out.strftime("%H:%M")) == ["14:30", "13:30"]
+    assert timezones.convert_index(idx, "us", "America/New_York").equals(idx)

@@ -25,17 +25,27 @@ def fmt_price(x: float) -> str:
     return f"{x:,.{decimals}f}"
 
 
-# Regular trading hours (local time, as decimal hours) used to hide overnight gaps on intraday charts.
-_SESSION_HOURS = {"us": (9.5, 16), "india": (9.25, 15.5)}
+def _bar_step(index: pd.DatetimeIndex) -> pd.Timedelta:
+    """Typical spacing between bars (the median, so overnight gaps don't count)."""
+    if len(index) < 2:
+        return pd.Timedelta(days=1)
+    return pd.Series(index).diff().median()
 
 
-def _axis_breaks(fig: go.Figure, market: str, intraday: bool = False) -> None:
-    if market == "crypto":  # trades 24/7: no gaps to hide
+def _axis_breaks(fig: go.Figure, market: str, intraday: bool = False,
+                 index: Optional[pd.DatetimeIndex] = None) -> None:
+    """Hide the time when stocks don't trade. Crypto trades 24/7, so nothing is hidden.
+
+    Intraday breaks come from the bars themselves (every gap longer than a few bars: nights,
+    weekends, holidays), so they stay right in any display time zone.
+    """
+    if market == "crypto":
         return
-    breaks = [dict(bounds=["sat", "mon"])]  # stocks don't trade on weekends
-    if intraday and market in _SESSION_HOURS:
-        open_h, close_h = _SESSION_HOURS[market]
-        breaks.append(dict(bounds=[close_h, open_h], pattern="hour"))
+    if not intraday or index is None or len(index) < 2:
+        fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])  # daily bars: hide weekends
+        return
+    step = _bar_step(index)
+    breaks = [dict(bounds=[a + step, b]) for a, b in zip(index[:-1], index[1:]) if b - a > step * 3]
     fig.update_xaxes(rangebreaks=breaks)
 
 
@@ -126,10 +136,11 @@ def price_chart(
                       xaxis_rangeslider_visible=False,
                       legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0))
     fig.update_yaxes(range=[0, 100], row=3, col=1)
-    if initial_bars and len(df) > initial_bars:
-        step = df.index[-1] - df.index[-2]
-        fig.update_xaxes(range=[df.index[-initial_bars] - step / 2, df.index[-1] + step * 2])
-    _axis_breaks(fig, market, intraday)
+    if len(df) >= 2:  # open exactly on the bars (latest `initial_bars` of them), no empty margins
+        step = _bar_step(df.index)
+        first = df.index[-initial_bars] if initial_bars and len(df) > initial_bars else df.index[0]
+        fig.update_xaxes(range=[first - step / 2, df.index[-1] + step * 2])
+    _axis_breaks(fig, market, intraday, df.index)
     return fig
 
 

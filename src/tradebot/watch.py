@@ -178,16 +178,16 @@ class ChartSignal:
     interval: str
     strategy: str
     action: str          # BUY / SELL
-    bar_start: str       # exchange time, as shown on the chart
+    bar_start: str       # bar open time in the chosen time zone (`tradebot.timezones`), as on the chart
     closed_utc: datetime
     price: float
     reason: str
     stop: Optional[float] = None
     target: Optional[float] = None
+    tz: str = "UTC"      # label of the time zone bar_start is in
 
     def lines(self, now: datetime) -> List[str]:
-        market = market_of(self.symbol)
-        tz = {"us": "New York", "india": "India", "crypto": "UTC"}.get(market, "")
+        tz = self.tz
         out = [f"{'🟢' if self.action == 'BUY' else '🔴'} {self.action} {self.symbol} · {self.interval} bars · {self.strategy}",
                f"  Close {fmt_price(self.price)} on the {self.bar_start} bar ({tz} time)"]
         if self.action == "BUY" and self.stop is not None:
@@ -244,8 +244,10 @@ def _market_closed(market: str, now: datetime) -> bool:
 def check(settings: Dict[str, Any], load_bars: Optional[BarLoader] = None,
           now: Optional[datetime] = None, force: bool = False) -> WatchResult:
     """Look for BUY/SELL signals on bars that closed since the last check. Updates watch_state.json."""
+    from . import timezones
     from .services import strategy_from
 
+    tz_pref = timezones.load_pref()
     now = now or datetime.now(timezone.utc)
     load_bars = load_bars or yahoo_bars
     risk = RiskConfig.from_settings(settings)
@@ -270,6 +272,8 @@ def check(settings: Dict[str, Any], load_bars: Optional[BarLoader] = None,
             sigs = strategy.generate(bars)
             atr = ind.atr(bars, risk.atr_period)
             closes = [to_utc(bar_end(ts, e["interval"], market), market) for ts in bars.index]
+            zone = timezones.resolve(tz_pref, market)
+            shown_at = timezones.convert_index(bars.index, market, zone)
             found = []
             for i, ts in enumerate(bars.index):
                 if closes[i] <= since or sigs["signal"].iloc[i] == 0:
@@ -279,8 +283,9 @@ def check(settings: Dict[str, Any], load_bars: Optional[BarLoader] = None,
                 stop = price - risk.atr_stop_mult * a if buy and a == a else None
                 found.append(ChartSignal(
                     e["symbol"], e["interval"], e["strategy"], "BUY" if buy else "SELL",
-                    f"{ts:%a %d %b %H:%M}", closes[i], price, str(sigs["reason"].iloc[i]),
-                    stop, price + risk.reward_risk * (price - stop) if stop is not None else None))
+                    f"{shown_at[i]:%a %d %b %H:%M}", closes[i], price, str(sigs["reason"].iloc[i]),
+                    stop, price + risk.reward_risk * (price - stop) if stop is not None else None,
+                    timezones.label(zone)))
             result.signals += found[-MAX_ALERTS_PER_ENTRY:]
             st = {"last_close_utc": closes[-1].isoformat(), "last_bar": f"{bars.index[-1]:%Y-%m-%d %H:%M}"}
             if found:
