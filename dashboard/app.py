@@ -5,6 +5,7 @@ Run with:  tradebot dashboard      (or: streamlit run dashboard/app.py)
 from __future__ import annotations
 
 import sys
+import time
 import warnings
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -59,8 +60,9 @@ def load_history(symbol: str, start_iso: str, nonce: int) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_intraday(symbol: str, interval: str, days: int, nonce: int) -> pd.DataFrame:
+def load_intraday(symbol: str, interval: str, days: int, nonce: int, live_tick: int = 0) -> pd.DataFrame:
     """Minute/hour bars for the chart. Cached for a minute only; the last bar may still be forming.
+    `live_tick` changes on every live-refresh tick, forcing a fresh download.
     2h and 4h bars are built from hourly bars, the same way the chart alerts build them."""
     src = CHART_SOURCE.get(interval, interval)
     df = YFinanceProvider().get_intraday(symbol, src, days)
@@ -218,12 +220,17 @@ def alert_toggle(symbol: str, interval: str, strategy: str) -> None:
                    "Chart alerts tab.")
 
 
-def _intraday_chart(symbol: str, interval: str, days: int, label: str) -> None:
+def live_seconds(interval: str) -> int:
+    """How often live refresh redraws: every minute for 1m/5m bars, every 5 minutes for longer bars."""
+    return 60 if interval in ("1m", "5m") else 300
+
+
+def _intraday_chart(symbol: str, interval: str, days: int, label: str, live_tick: int = 0) -> None:
     sym_market = market_of(symbol)
     # Load extra bars so the 200-bar average is valid from the first bar shown, within Yahoo's limit.
     with st.spinner(f"Loading {interval} bars for {symbol}..."):
         df = load_intraday(symbol, interval, INTRADAY_MAX_DAYS[CHART_SOURCE.get(interval, interval)],
-                           st.session_state.nonce)
+                           st.session_state.nonce, live_tick)
     if df.empty:
         st.error(no_data_message(symbol))
         return
@@ -279,7 +286,21 @@ with tab_chart:
         st.caption(f"Showing Yahoo Finance's **{custom}** for {raw.strip()}. Yahoo has USD pairs only; "
                    "USDT trades within about 0.1% of USD, so candles and signals are effectively the same.")
     if symbol and interval != "1D":
-        _intraday_chart(symbol, interval, days, span)
+        every = live_seconds(interval)
+        live = st.toggle(f"⟳ Live refresh (every {every // 60} min)", key="live_refresh",
+                         help="Re-downloads the bars and redraws this chart on a timer while the page is open. "
+                              "Each refresh resets zoom and scroll, so turn it off to study history.")
+        if live:
+            @st.fragment(run_every=every)
+            def _live_chart() -> None:
+                tick = int(time.time() // every)
+                _intraday_chart(symbol, interval, days, span, live_tick=tick)
+                st.caption(f"Live: updated {datetime.now():%H:%M:%S} on this computer's clock; "
+                           f"next update in about {every // 60} min.")
+
+            _live_chart()
+        else:
+            _intraday_chart(symbol, interval, days, span)
     elif symbol:
         strategy = strategy_from(settings, strategy_name)
         with st.spinner(f"Loading {symbol}..."):
