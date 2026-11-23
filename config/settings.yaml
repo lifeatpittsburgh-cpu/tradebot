@@ -109,7 +109,7 @@ schedule:
 # Phase 5: send TradeBot's orders to an Alpaca account (README: "Broker: Alpaca").
 # Keys go in .env: ALPACA_PAPER_KEY_ID / ALPACA_PAPER_SECRET_KEY (and separate LIVE keys for live).
 broker:
-  enabled: false           # true: `tradebot daily` also sends orders to Alpaca
+  enabled: true            # true: `tradebot daily` also sends orders to Alpaca
   mode: paper              # paper = simulated money, orders sent automatically
                            # live  = real money; orders are only PROPOSED and each needs a typed
                            #         `yes` in `tradebot broker confirm`
