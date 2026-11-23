@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sys
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -13,7 +13,8 @@ from .alpaca import AlpacaClient, AlpacaError
 from .executor import BrokerConfig, Executor, RunResult
 
 
-def latest_signals(settings: Dict[str, Any], markets: List[str]) -> Tuple[List[Signal], Dict[str, pd.DataFrame]]:
+def latest_signals(settings: Dict[str, Any], markets: List[str],
+                   review: Optional[Callable[[Signal], Signal]] = None) -> Tuple[List[Signal], Dict[str, pd.DataFrame]]:
     """Signals on the latest completed candle, each market with its configured strategy."""
     from ..risk import RiskConfig
     from ..scanner import signal_for_latest_bar
@@ -33,7 +34,8 @@ def latest_signals(settings: Dict[str, Any], markets: List[str]) -> Tuple[List[S
                 if len(df) < strat.warmup + 2:
                     continue
                 bars[sym] = df
-                signals.append(signal_for_latest_bar(sym, df, strat, risk))
+                sig = signal_for_latest_bar(sym, df, strat, risk)
+                signals.append(review(sig) if review is not None else sig)
             except Exception as exc:
                 print(f"!! {sym}: {type(exc).__name__}: {exc}", file=sys.stderr)
     return signals, bars
@@ -45,10 +47,11 @@ def make_executor(settings: Dict[str, Any], session=None) -> Executor:
 
 
 def run_broker_step(settings: Dict[str, Any], signals: Optional[List[Signal]] = None,
-                    bars: Optional[Dict[str, pd.DataFrame]] = None, dry_run: bool = False) -> RunResult:
+                    bars: Optional[Dict[str, pd.DataFrame]] = None, dry_run: bool = False,
+                    review: Optional[Callable[[Signal], Signal]] = None) -> RunResult:
     ex = make_executor(settings)
     if signals is None:
-        signals, bars = latest_signals(settings, ex.cfg.markets)
+        signals, bars = latest_signals(settings, ex.cfg.markets, review)
     return ex.run(signals, bars, dry_run=dry_run)
 
 

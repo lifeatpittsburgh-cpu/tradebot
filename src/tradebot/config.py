@@ -41,6 +41,7 @@ DEFAULTS: Dict[str, Any] = {
     "alerts": {"console": True, "macos": True, "telegram": False,
                "state_path": "state/alert_state.json", "last_run_path": "state/last_run.json"},
     "schedule": {"time": "20:15", "timezone": "America/New_York"},
+    "ai_study": {"enabled": False},  # full defaults in tradebot.ai_study.DEFAULTS
 }
 
 MARKETS = ("us", "crypto", "india")

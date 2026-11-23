@@ -19,7 +19,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 dashboard = ["streamlit>=1.40", "plotly>=5.18", "watchdog>=4"]
-research = ["lxml>=4.9"]  # `tradebot universe update` parses Wikipedia tables
+research = ["lxml>=4.9"]
+ai = ["anthropic>=0.100"]  # AI market study (`tradebot ai`); Python 3.9 gets the last 0.x release  # `tradebot universe update` parses Wikipedia tables
 
 [project.scripts]
 tradebot = "tradebot.cli:main"

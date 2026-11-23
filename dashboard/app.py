@@ -28,6 +28,7 @@ from tradebot.config import (CURRENCY, active_markets, is_tradable, load_setting
 from tradebot.data import INTRADAY_MAX_DAYS, CachedProvider, YFinanceProvider  # noqa: E402
 from tradebot.risk import RiskConfig  # noqa: E402
 from tradebot.scanner import signal_for_latest_bar  # noqa: E402
+from tradebot.signals import Signal  # noqa: E402
 from tradebot.services import (DISCLAIMER, accounts_frame, broker_from, history_frame,  # noqa: E402
                                pending_frame, positions_frame, run_paper_update, signals_frame,
                                strategy_from, strategy_name_for, symbols_for)
@@ -35,6 +36,7 @@ from tradebot.daily import load_last_run  # noqa: E402
 from tradebot.strategies import REGISTRY  # noqa: E402
 from tradebot import watch as chart_alerts  # noqa: E402
 from tradebot import timezones  # noqa: E402
+from tradebot import ai_study  # noqa: E402
 
 LOCAL_TZ = datetime.now().astimezone().tzinfo
 
@@ -143,6 +145,13 @@ tab_signals, tab_chart, tab_alerts, tab_backtest, tab_paper = st.tabs(
 
 
 # ---- Signals ---------------------------------------------------------------------------------
+def _ago_text(iso: str) -> str:
+    if not iso:
+        return ""
+    mins = int((pd.Timestamp.now(tz="UTC") - pd.Timestamp(iso)).total_seconds() // 60)
+    return f"{mins} min ago" if mins < 120 else f"{mins // 60} h ago"
+
+
 with tab_signals:
     st.subheader(f"Signals: {MARKET_NAMES[market]}")
     with st.spinner("Scanning watchlist..."):
@@ -161,6 +170,12 @@ with tab_signals:
                    f"Quantities are sized from the paper starting capital "
                    f"({CURRENCY[market]} {settings['paper']['starting_capital'].get(market, 0):,.0f}).")
         fmt = price_fmt(market)
+        study = ai_study.load(settings)
+        if study.get("symbols"):
+            views = study["symbols"]
+            table["ai_view"] = table["symbol"].map(
+                lambda s: f"{views[s]['view']} {views[s]['confidence']:.2f}" if s in views else "")
+            table["ai_reason"] = table["symbol"].map(lambda s: views.get(s, {}).get("reason", ""))
         st.dataframe(
             table.drop(columns=["market"]).style.map(lambda v: ACTION_COLORS.get(v, ""), subset=["action"]),
             hide_index=True, width="stretch",
@@ -171,9 +186,47 @@ with tab_signals:
                 "qty": st.column_config.NumberColumn(format="%g"),
                 "last_signal": "last signal", "last_signal_date": "on",
                 "reason": st.column_config.TextColumn(width="large"),
+                "ai_view": "AI view", "ai_reason": st.column_config.TextColumn("AI reason", width="large"),
             })
     for sym, err in errors.items():
         st.error(f"{sym}: {err}")
+
+    # ---- AI market study -------------------------------------------------------------------
+    st.subheader("🤖 AI market study")
+    study = ai_study.load(settings)
+    ai_cfg = ai_study.config(settings)
+    if study.get("markets"):
+        moods = study["markets"]
+        cols = st.columns(max(len(moods), 1))
+        for col, (m, v) in zip(cols, sorted(moods.items())):
+            col.metric(f"{MARKET_NAMES.get(m, m)} mood", f"{v['view']} {v['confidence']:.2f}", border=True)
+            col.caption(v.get("reason", ""))
+        if not table.empty:
+            review = ai_study.Review(study=study)
+            check = ai_study.reviewer(settings, review)
+            for row in table[table["action"] == "BUY"].itertuples():
+                check(Signal(row.symbol, market_of(row.symbol), row.date, "BUY", row.close, ""))
+            for h in review.held_back:
+                st.warning(f"Would hold back {h}")
+        u = study.get("usage", {})
+        st.caption(f"Study from {_ago_text(study['created']) if study.get('created') else '?'} by {study.get('model', '?')} "
+                   f"({u.get('input_tokens', 0):,} in / {u.get('output_tokens', 0):,} out tokens), from Yahoo headlines. "
+                   + ("The daily job uses it: a BUY is held back when its news or its market is rated bearish "
+                      f"with confidence ≥ {ai_cfg['min_confidence']}." if ai_cfg["enabled"] and ai_cfg["veto"] else
+                      "The daily job shows it in alerts only (veto off)." if ai_cfg["enabled"] else
+                      "Not used by the daily job yet: set ai_study.enabled: true in config/settings.yaml."))
+    else:
+        st.info("No AI study yet. It needs ANTHROPIC_API_KEY in .env. Run one below or with `tradebot ai study`.")
+    if st.button("Run AI study now", help="Asks Claude to rate today's news for every watchlist symbol. "
+                                         "Costs a few cents in API usage."):
+        with st.spinner("Reading headlines and asking Claude..."):
+            try:
+                ai_study.run_study(settings, symbols_for(settings, "all"), force=True)
+                st.rerun()
+            except ImportError:
+                st.error("Install the Anthropic SDK first: pip install -e '.[ai]'")
+            except ai_study.StudyError as exc:
+                st.error(str(exc))
 
 
 # ---- Chart -----------------------------------------------------------------------------------
@@ -345,13 +398,6 @@ with tab_chart:
 
 
 # ---- Chart alerts ----------------------------------------------------------------------------
-def _ago_text(iso: str) -> str:
-    if not iso:
-        return ""
-    mins = int((pd.Timestamp.now(tz="UTC") - pd.Timestamp(iso)).total_seconds() // 60)
-    return f"{mins} min ago" if mins < 120 else f"{mins // 60} h ago"
-
-
 with tab_alerts:
     st.subheader("Chart alerts")
     st.caption("Get a Telegram message when a bar closes with a BUY or SELL marker, the same markers the Chart tab "

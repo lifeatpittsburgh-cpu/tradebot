@@ -126,6 +126,12 @@ tradingbot/
 - [x] Alpaca paper account connected and enabled (2026-11-23); daily job sends paper orders from then on
 - [ ] Zerodha Kite / Upstox (India) read-only: dropped while India is out of scope
 
+### Phase 6 — Intraday chart alerts and AI market study
+- [x] Telegram chart alerts for chosen symbols and bar sizes (15m–4h), once per closed bar (#8)
+- [x] Chart period fixes, time-zone choice, Live refresh switch (#9–#11)
+- [x] AI market study: Claude rates news and market mood daily; can hold back BUYs, never adds trades
+- [ ] Raspberry Pi 5: Linux scheduler (systemd), dashboard service, setup guide
+
 ## Results log
 
 **2026-11-22, portfolio backtest, 5 years to 2026-11-20, default watchlists and settings**

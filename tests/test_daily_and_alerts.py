@@ -31,6 +31,7 @@ def setup(tmp_path, monkeypatch):
     settings["watchlists"]["us"] = ["AAA", "BBB"]
     settings["paper"]["ledger_path"] = str(tmp_path / "ledger.json")
     settings["broker"]["enabled"] = False  # never reach Alpaca from a test, whatever settings.yaml says
+    settings["ai_study"] = {"enabled": False}  # never call the Anthropic API from a test
     settings["alerts"].update(console=True, macos=False, telegram=False,
                               state_path=str(tmp_path / "alerted.json"),
                               last_run_path=str(tmp_path / "last_run.json"))

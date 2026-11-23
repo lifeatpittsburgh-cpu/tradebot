@@ -118,3 +118,16 @@ broker:
   max_order_value: 2000    # USD cap per order
   max_orders_per_run: 5    # most new buys per daily run
   crypto_stop_limit_gap: 0.01  # crypto stop-limit sells may fill down to 1% below the stop
+
+# AI market study: Claude reads recent news and the market's mood once a day (needs ANTHROPIC_API_KEY
+# in .env and `pip install -e '.[ai]'`). It can only hold back BUYs, never add trades. Try it with
+# `tradebot ai study` before turning it on.
+ai_study:
+  enabled: false
+  model: claude-opus-5-5
+  effort: low              # low | medium | high: deeper thinking costs more
+  veto: true               # false = show the AI view in alerts but never hold back a BUY
+  min_confidence: 0.6      # a bearish rating must be at least this sure to hold back a BUY
+  market_veto: true        # also hold back BUYs when the whole market is rated bearish
+  max_headlines: 6         # per symbol
+  max_age_hours: 12        # reuse a study younger than this

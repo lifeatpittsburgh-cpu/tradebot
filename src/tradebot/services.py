@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -67,10 +67,12 @@ def run_paper_update(
     symbols: List[str],
     strategy: Optional[Strategy] = None,
     provider: Optional[DataProvider] = None,
+    review: Optional[Callable[[Signal], Signal]] = None,
 ) -> Tuple[List[Signal], Dict[str, str]]:
     """One end-of-day paper-trading pass: fill yesterday's orders, check stops/targets,
     queue orders from today's signals, save the ledger. Without `strategy`, each symbol uses
-    the strategy configured for its market."""
+    the strategy configured for its market. `review` (the AI market study) may turn a BUY into HOLD
+    before it is queued."""
     by_market: Dict[str, Strategy] = {}
 
     def strat_for(symbol: str) -> Strategy:
@@ -94,6 +96,8 @@ def run_paper_update(
                 continue
             broker.sync(symbol, df)
             sig = signal_for_latest_bar(symbol, df, strat, broker.risk, broker.equity(market_of(symbol)))
+            if review is not None:
+                sig = review(sig)
             signals.append(sig)
             if sig.action == "BUY":
                 broker.queue(symbol, "buy", sig.date, sig.extra["atr"], strat.name, sig.reason)
