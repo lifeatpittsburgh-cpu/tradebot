@@ -114,7 +114,7 @@ tradingbot/
 - [x] Strategy per market (`strategy.by_market`): live US uses sma_crossover (best on the S&P 500
       test), crypto keeps macd_trend (best on the crypto watchlist; no fair crypto test exists)
 
-### Phase 5 — Broker integration (built; paper first)
+### Phase 5 — Broker integration (done: paper live, real money off)
 - [x] Alpaca client (REST): account, positions, orders, assets; paper and live hosts with separate keys
 - [x] Order planner: US bracket orders (stop + target at the broker); crypto market buy, protective
       stop-limit, take-profit on the daily high; SELL signals cancel open orders and sell
@@ -123,7 +123,7 @@ tradingbot/
 - [x] Live mode, off by default: proposals only; each order sent after a typed `yes` in
       `tradebot broker confirm` at a terminal; proposals expire after 20 hours
 - [x] Daily job integration (`broker.enabled`) with orders in the alert
-- [ ] Connect your Alpaca paper account and let it run (needs your keys)
+- [x] Alpaca paper account connected and enabled (2026-11-23); daily job sends paper orders from then on
 - [ ] Zerodha Kite / Upstox (India) read-only: dropped while India is out of scope
 
 ## Results log
