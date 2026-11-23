@@ -255,7 +255,11 @@ bearish** with a confidence and a one-line reason. It is a second opinion on the
 Setup:
 
 1. `pip install -e ".[ai]"` (installs the Anthropic SDK).
-2. Create a key at console.anthropic.com → API Keys and add `ANTHROPIC_API_KEY=...` to `.env`.
+2. Sign in, either way works:
+   - **On the Mac:** `brew install anthropics/tap/ant`, then `ant auth login` (the browser opens
+     to finish). The SDK and the scheduled job pick the sign-in up from `~/.config/anthropic/`.
+   - **With a key** (simplest on a headless Raspberry Pi): create one at console.anthropic.com →
+     API Keys and add `ANTHROPIC_API_KEY=...` to `.env`. A key in `.env` wins over the sign-in.
 3. Try it: `tradebot ai study` (one Claude request), then `tradebot ai show`.
 4. Turn it on for the daily job: `ai_study.enabled: true` in `config/settings.yaml`. Set
    `veto: false` to see the AI view in alerts without it holding anything back.

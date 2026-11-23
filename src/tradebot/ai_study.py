@@ -167,7 +167,7 @@ def ask_claude(inputs: Dict[str, Any], cfg: Dict[str, Any], client=None) -> Tupl
                        f"Today is {today}. Rate these markets and symbols.\n<news_data>\n{body}\n</news_data>"}],
         )
     except anthropic.AuthenticationError:
-        raise StudyError("ANTHROPIC_API_KEY is missing or invalid (add it to .env)")
+        raise StudyError("Anthropic credentials were rejected: rerun `ant auth login` or check ANTHROPIC_API_KEY in .env")
     except anthropic.RateLimitError:
         raise StudyError("Anthropic rate limit; will retry on the next run")
     except anthropic.APIStatusError as exc:
@@ -177,7 +177,7 @@ def ask_claude(inputs: Dict[str, Any], cfg: Dict[str, Any], client=None) -> Tupl
     except TypeError as exc:  # the SDK found no API key or other credentials
         if "authentication" not in str(exc):
             raise
-        raise StudyError("ANTHROPIC_API_KEY is not set (add it to .env)")
+        raise StudyError("no Anthropic credentials: run `ant auth login` or add ANTHROPIC_API_KEY to .env")
     if resp.stop_reason == "refusal":
         raise StudyError("Claude declined the request")
     if resp.stop_reason == "max_tokens":
